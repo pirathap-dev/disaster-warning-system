@@ -38,4 +38,25 @@ export enum WarningLevel {
   CRITICAL = 'CRITICAL',
 }
 
+export enum ShelterStatus {
+  OPEN = 'OPEN',
+  CLOSED = 'CLOSED',
+}
+
+export enum ShelterCapacityStatus {
+  OPEN = 'OPEN',
+  NEAR_FULL = 'NEAR_FULL',
+  FULL = 'FULL',
+  CLOSED = 'CLOSED',
+}
+
+export enum ReliefAllocationStatus {
+  REQUESTED = 'REQUESTED',
+  ALLOCATED = 'ALLOCATED',
+  DISPATCHED = 'DISPATCHED',
+  RECEIVED = 'RECEIVED',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}
+
 // ... more types to be added by other devs

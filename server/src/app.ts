@@ -3,6 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import healthRoutes from './routes/health';
+import sheltersRoutes from './routes/shelters';
+import reliefResourcesRoutes from './routes/reliefResources';
+import reliefAllocationsRoutes from './routes/reliefAllocations';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
@@ -16,6 +19,9 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/shelters', sheltersRoutes);
+app.use('/api/relief-resources', reliefResourcesRoutes);
+app.use('/api/relief-allocations', reliefAllocationsRoutes);
 
 // Add future routes here
 // app.use('/api/users', userRoutes);
