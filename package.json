@@ -1,0 +1,28 @@
+{
+  "name": "disaster-management-system",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "concurrently \"npm run start:server\" \"npm run start:client\"",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "build": "npm run build:client && npm run build:server",
+    "test": "npm run test:server && npm run test:client",
+    "test:coverage": "npm run coverage:server && npm run coverage:client",
+    "lint": "npm run lint:server && npm run lint:client",
+    "start:server": "cd server && npm start",
+    "start:client": "cd client && npm run preview",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && npm run build",
+    "test:server": "cd server && npm run test",
+    "test:client": "cd client && npm run test",
+    "coverage:server": "cd server && npm run test:coverage",
+    "coverage:client": "cd client && npm run coverage",
+    "lint:server": "cd server && npm run lint",
+    "lint:client": "cd client && npm run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
