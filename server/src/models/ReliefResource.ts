@@ -1,6 +1,7 @@
 import { Document, Schema, model } from 'mongoose';
 
 export interface IReliefResource extends Document {
+  ownerUserId?: string;
   name: string;
   category: string;
   availableQuantity: number;
@@ -12,6 +13,7 @@ export interface IReliefResource extends Document {
 
 const reliefResourceSchema = new Schema<IReliefResource>(
   {
+    ownerUserId: { type: String, index: true, sparse: true },
     name: { type: String, required: true, trim: true },
     category: { type: String, required: true, trim: true },
     availableQuantity: {

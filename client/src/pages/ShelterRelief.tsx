@@ -27,6 +27,8 @@ import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/Table';
 import { useToast } from '../components/ui/Toast';
+import { useAuth } from '../auth/AuthContext';
+import { UserRole } from '../types';
 import {
   reliefApi,
   type ReliefAllocation,
@@ -35,7 +37,7 @@ import {
   type Shelter,
 } from '../types/relief';
 
-type Workspace = 'officer' | 'coordinator';
+type Workspace = 'finder' | 'officer' | 'coordinator' | 'organization';
 
 const activeStatuses: ReliefAllocationStatus[] = ['REQUESTED', 'ALLOCATED', 'DISPATCHED'];
 
@@ -92,7 +94,15 @@ function AllocationDetails({
 
 export default function ShelterRelief() {
   const { toast } = useToast();
-  const [workspace, setWorkspace] = useState<Workspace>('officer');
+  const { session } = useAuth();
+  const role = session?.user.role;
+  const workspace: Workspace = role === UserRole.RESOURCE_ORGANIZATION
+    ? 'organization'
+    : role === UserRole.SHELTER_COORDINATOR
+      ? 'coordinator'
+      : role === UserRole.DISTRICT_OFFICER
+        ? 'officer'
+        : 'finder';
   const [shelters, setShelters] = useState<Shelter[]>([]);
   const [resources, setResources] = useState<ReliefResource[]>([]);
   const [allocations, setAllocations] = useState<ReliefAllocation[]>([]);
@@ -107,15 +117,23 @@ export default function ShelterRelief() {
   const [coordinatorShelterId, setCoordinatorShelterId] = useState('');
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
   const [detailsAllocation, setDetailsAllocation] = useState<ReliefAllocation | null>(null);
+  const [currentOccupancy, setCurrentOccupancy] = useState('');
+  const [resourceName, setResourceName] = useState('');
+  const [resourceCategory, setResourceCategory] = useState('');
+  const [resourceQuantity, setResourceQuantity] = useState('0');
+  const [resourceUnit, setResourceUnit] = useState('');
+  const [resourceSource, setResourceSource] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
       const [nextShelters, nextResources, nextAllocations] = await Promise.all([
-        reliefApi.getShelters(),
-        reliefApi.getResources(),
-        reliefApi.getAllocations(),
+        workspace === 'organization' ? Promise.resolve([]) : reliefApi.getShelters(),
+        workspace === 'finder' ? Promise.resolve([]) : reliefApi.getResources(),
+        workspace === 'officer' || workspace === 'coordinator'
+          ? reliefApi.getAllocations()
+          : Promise.resolve([]),
       ]);
       setShelters(nextShelters);
       setResources(nextResources);
@@ -126,7 +144,7 @@ export default function ShelterRelief() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [workspace]);
 
   useEffect(() => {
     void loadData();
@@ -144,6 +162,7 @@ export default function ShelterRelief() {
     [allocations, shelterId, resourceId]
   );
   const coordinatorShelter = coordinatorShelterId || shelters[0]?._id || '';
+  const selectedCoordinatorShelter = shelters.find((shelter) => shelter._id === coordinatorShelter);
   const incomingAllocations = allocations.filter((allocation) =>
     relatedId(allocation.shelter) === coordinatorShelter &&
     (allocation.status === 'ALLOCATED' || allocation.status === 'DISPATCHED')
@@ -219,6 +238,73 @@ export default function ShelterRelief() {
     }
   }
 
+  async function saveOccupancy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const occupancy = Number(currentOccupancy);
+    if (!selectedCoordinatorShelter || !Number.isInteger(occupancy) || occupancy < 0 || occupancy > selectedCoordinatorShelter.capacity) {
+      toast('Enter a whole-number occupancy within this shelter capacity.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reliefApi.updateOccupancy(selectedCoordinatorShelter._id, occupancy);
+      toast('Shelter occupancy updated.', 'success');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not update shelter occupancy', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function createResource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const availableQuantity = Number(resourceQuantity);
+    if (!resourceName.trim() || !resourceCategory.trim() || !resourceUnit.trim() || !Number.isInteger(availableQuantity) || availableQuantity < 0) {
+      toast('Complete the stock details with a non-negative whole-number quantity.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reliefApi.createResource({
+        name: resourceName.trim(),
+        category: resourceCategory.trim(),
+        availableQuantity,
+        unit: resourceUnit.trim(),
+        source: resourceSource.trim() || undefined,
+      });
+      setResourceName('');
+      setResourceCategory('');
+      setResourceQuantity('0');
+      setResourceUnit('');
+      setResourceSource('');
+      toast('Stock item created.', 'success');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not create stock item', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function saveStock(resource: ReliefResource) {
+    const availableQuantity = Number(receiptQuantities[`stock:${resource._id}`] ?? resource.availableQuantity);
+    if (!Number.isInteger(availableQuantity) || availableQuantity < 0) {
+      toast('Stock must be a non-negative whole number.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reliefApi.updateResource(resource._id, { availableQuantity });
+      toast('Stock quantity updated.', 'success');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not update stock', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (loading && shelters.length === 0 && resources.length === 0 && allocations.length === 0) {
     return <Loading text="Loading shelter and relief operations..." />;
   }
@@ -240,26 +326,9 @@ export default function ShelterRelief() {
           <h2 className="text-2xl font-bold text-gray-900">Shelter &amp; Relief</h2>
           <p className="mt-1 text-gray-500">Monitor shelter capacity, allocate resources, and confirm deliveries.</p>
         </div>
-        <div className="flex gap-2" role="tablist" aria-label="Relief operations workspace">
-          <Button
-            type="button"
-            variant={workspace === 'officer' ? 'primary' : 'secondary'}
-            onClick={() => setWorkspace('officer')}
-            role="tab"
-            aria-selected={workspace === 'officer'}
-          >
-            District Officer
-          </Button>
-          <Button
-            type="button"
-            variant={workspace === 'coordinator' ? 'primary' : 'secondary'}
-            onClick={() => setWorkspace('coordinator')}
-            role="tab"
-            aria-selected={workspace === 'coordinator'}
-          >
-            Shelter Coordinator
-          </Button>
-        </div>
+        <p className="text-sm font-medium text-slate-600">
+          {workspace === 'officer' ? 'District Officer' : workspace === 'coordinator' ? 'Shelter Coordinator' : workspace === 'organization' ? 'Resource Organization' : 'Citizen shelter finder'}
+        </p>
       </div>
 
       {loadError && (
@@ -268,7 +337,58 @@ export default function ShelterRelief() {
         </div>
       )}
 
-      {workspace === 'officer' ? (
+      {workspace === 'finder' ? (
+        <section aria-label="Shelter finder" className="divide-y divide-slate-200 border-y border-slate-200">
+          {shelters.length === 0 ? (
+            <EmptyState title="No open shelters found" description="Shelter locations will appear when available." />
+          ) : shelters.map((shelter) => (
+            <article key={shelter._id} className="grid gap-3 py-5 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-slate-900">{shelter.name}</h3>
+                  <Badge variant={statusVariant(shelter.capacityStatus)}>{displayStatus(shelter.capacityStatus)}</Badge>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">{shelter.location}</p>
+              </div>
+              <p className="text-sm text-slate-700">
+                {shelter.availableCapacity.toLocaleString()} spaces available of {shelter.capacity.toLocaleString()}
+              </p>
+            </article>
+          ))}
+        </section>
+      ) : workspace === 'organization' ? (
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <Card>
+            <CardHeader><CardTitle>Add organization stock</CardTitle></CardHeader>
+            <CardContent>
+              <form className="space-y-4" onSubmit={createResource}>
+                <Input label="Resource name" value={resourceName} onChange={(event) => setResourceName(event.target.value)} required />
+                <Input label="Category" value={resourceCategory} onChange={(event) => setResourceCategory(event.target.value)} required />
+                <Input label="Available quantity" type="number" min="0" step="1" value={resourceQuantity} onChange={(event) => setResourceQuantity(event.target.value)} required />
+                <Input label="Unit" value={resourceUnit} onChange={(event) => setResourceUnit(event.target.value)} required />
+                <Input label="Source (optional)" value={resourceSource} onChange={(event) => setResourceSource(event.target.value)} />
+                <Button type="submit" disabled={submitting}>{submitting ? 'Saving...' : 'Add stock'}</Button>
+              </form>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>My stock</CardTitle></CardHeader>
+            <CardContent>
+              {resources.length === 0 ? <EmptyState title="No stock recorded" description="Add stock to make it available for district relief allocation." /> : (
+                <div className="divide-y divide-slate-200">
+                  {resources.map((resource) => (
+                    <div key={resource._id} className="grid gap-3 py-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+                      <div><p className="font-medium text-slate-900">{resource.name}</p><p className="text-sm text-slate-500">{resource.category} · {resource.unit}</p></div>
+                      <Input label="Quantity" aria-label={`Stock quantity for ${resource.name}`} type="number" min="0" step="1" value={receiptQuantities[`stock:${resource._id}`] ?? String(resource.availableQuantity)} onChange={(event) => setReceiptQuantities((current) => ({ ...current, [`stock:${resource._id}`]: event.target.value }))} />
+                      <Button type="button" variant="secondary" onClick={() => void saveStock(resource)} disabled={submitting}>Update stock</Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : workspace === 'officer' ? (
         <>
           <div className="grid gap-4 sm:grid-cols-3">
             <SummaryCard icon={<Home className="h-5 w-5" />} label="Shelters" value={shelters.length} />
@@ -444,6 +564,18 @@ export default function ShelterRelief() {
           />
         </>
       ) : (
+        <div className="space-y-6">
+          {selectedCoordinatorShelter && (
+            <Card>
+              <CardHeader><CardTitle>{selectedCoordinatorShelter.name} occupancy</CardTitle></CardHeader>
+              <CardContent>
+                <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={saveOccupancy}>
+                  <Input label={`Current occupancy (capacity ${selectedCoordinatorShelter.capacity})`} type="number" min="0" max={selectedCoordinatorShelter.capacity} step="1" value={currentOccupancy || String(selectedCoordinatorShelter.currentOccupancy)} onChange={(event) => setCurrentOccupancy(event.target.value)} />
+                  <Button type="submit" variant="secondary" disabled={submitting}>Update occupancy</Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
         <Card>
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -470,6 +602,7 @@ export default function ShelterRelief() {
             />
           </CardContent>
         </Card>
+        </div>
       )}
 
       <Modal

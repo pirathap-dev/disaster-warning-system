@@ -368,6 +368,7 @@ describe('allocation lifecycle and receipt', () => {
         deliveredQuantity: 80,
       })
     );
+    (modelMocks.resource.updateOne as jest.Mock).mockResolvedValue({ matchedCount: 1 });
 
     await expect(confirmReliefReceipt('allocation-1', 80, 'Two boxes damaged'))
       .resolves.toMatchObject({
@@ -383,6 +384,10 @@ describe('allocation lifecycle and receipt', () => {
         notes: 'Two boxes damaged',
       }) },
       { new: true, runValidators: true }
+    );
+    expect(modelMocks.resource.updateOne).toHaveBeenCalledWith(
+      { _id: 'resource-1' },
+      { $inc: { availableQuantity: 20 } }
     );
   });
 

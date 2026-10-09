@@ -27,6 +27,9 @@ vi.mock('../components/ui/Toast', () => ({
     toast: vi.fn(),
   }),
 }));
+vi.mock('../auth/AuthContext', () => ({
+  useAuth: () => ({ session: { user: { role: 'DMC_DUTY_OFFICER', id: 'dmc-1' } } }),
+}));
 
 describe('Warnings & Public Alert Module (Client UI)', () => {
   const mockHazards = [
@@ -138,12 +141,12 @@ describe('Warnings & Public Alert Module (Client UI)', () => {
     render(<Warnings />);
 
     fireEvent.click(await screen.findByText('Hazard Assessment Feed'));
-    const assessButtons = await screen.findAllByText(/Assess & Issue Warning/i);
+    const assessButtons = await screen.findAllByRole('button', { name: /Assess & Issue Warning/i });
     fireEvent.click(assessButtons[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/Create Targeted Public Warning/i)).toBeInTheDocument();
-      expect(screen.getByDisplayValue(/Colombo District/i)).toBeInTheDocument();
+      expect(screen.getByDisplayValue(/Hanwella reach/i)).toBeInTheDocument();
       expect(screen.getByText(/Preview & Publish/i)).toBeInTheDocument();
     });
   });

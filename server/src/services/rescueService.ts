@@ -24,6 +24,7 @@ export interface CreateAssignmentInput {
 }
 
 export interface CreateTeamInput {
+  userId?: string;
   name: string;
   capabilities: string[];
   location: { latitude: number; longitude: number };
@@ -120,8 +121,71 @@ export class RescueService {
     return this.data.createTeam(input);
   }
 
-  listTeams() {
-    return this.data.listTeams();
+  async listTeams(ownerUserId?: string) {
+    const teams = await this.data.listTeams();
+    return ownerUserId ? teams.filter((team) => team.userId === ownerUserId) : teams;
+  }
+
+  async decideAssignment(id: string, ownerUserId: string, decision: 'ACCEPTED' | 'DECLINED') {
+    const assignment = await this.getAssignment(id);
+    const team = assignment.rescueTeam as unknown as IRescueTeam;
+    if (team.userId !== ownerUserId) {
+      throw new RescueServiceError('You can only respond to your own assignments', 403, 'FORBIDDEN');
+    }
+    if (assignment.status !== 'DISPATCHED' || (assignment.decision && assignment.decision !== 'PENDING')) {
+      throw new RescueServiceError('Only pending dispatches can be accepted or declined', 409, 'INVALID_ASSIGNMENT_DECISION');
+    }
+    const updated = await this.data.updateAssignment(id, {
+      decision,
+      ...(decision === 'DECLINED' ? { status: 'DECLINED' } : {}),
+    });
+    if (!updated) throw new RescueServiceError('Assignment not found', 404, 'ASSIGNMENT_NOT_FOUND');
+    if (decision === 'DECLINED') {
+      const teamReference = assignment.rescueTeam as unknown as { _id?: Types.ObjectId };
+      await this.data.setTeamStatus(String(teamReference._id ?? assignment.rescueTeam), 'AVAILABLE');
+    }
+    return updated;
+  }
+
+  async reassignPendingAssignment(id: string, nextTeamId: string): Promise<IRescueAssignment> {
+    if (!Types.ObjectId.isValid(nextTeamId)) {
+      throw new RescueServiceError('Invalid rescue team ID', 400, 'INVALID_TEAM_ID');
+    }
+    const assignment = await this.getAssignment(id);
+    if (assignment.status !== 'DISPATCHED' || (assignment.decision && assignment.decision !== 'PENDING')) {
+      throw new RescueServiceError('Only pending dispatches can be reassigned', 409, 'ASSIGNMENT_NOT_REASSIGNABLE');
+    }
+    const currentTeam = assignment.rescueTeam as unknown as IRescueTeam;
+    if (String(currentTeam._id) === nextTeamId) {
+      throw new RescueServiceError('Select a different rescue team', 400, 'SAME_RESCUE_TEAM');
+    }
+    const incidentRef = assignment.incident as unknown as { _id?: Types.ObjectId };
+    const incident = await this.data.getIncident(String(incidentRef._id ?? assignment.incident));
+    const nextTeam = await this.data.getTeam(nextTeamId);
+    if (!incident || !nextTeam) {
+      throw new RescueServiceError('Incident or rescue team not found', 404, 'REASSIGNMENT_TARGET_NOT_FOUND');
+    }
+    const suitability = rankTeamsBySuitability([{
+      id: nextTeam.id,
+      name: nextTeam.name,
+      capabilities: nextTeam.capabilities,
+      status: nextTeam.status,
+      location: nextTeam.location,
+    }], { requiredCapabilities: incident.requiredCapabilities, location: incident.location })[0];
+    if (!suitability.suitable) {
+      throw new RescueServiceError('Replacement team is not suitable for this incident', 409, 'TEAM_NOT_SUITABLE');
+    }
+    const claimedTeam = await this.data.claimTeam(nextTeamId);
+    if (!claimedTeam) throw new RescueServiceError('Replacement team is no longer available', 409, 'TEAM_UNAVAILABLE');
+    try {
+      const updated = await this.data.updateAssignment(id, { rescueTeam: claimedTeam._id, decision: 'PENDING' });
+      if (!updated) throw new RescueServiceError('Assignment not found', 404, 'ASSIGNMENT_NOT_FOUND');
+      await this.data.setTeamStatus(String(currentTeam._id), 'AVAILABLE');
+      return updated;
+    } catch (error) {
+      await this.data.setTeamStatus(nextTeamId, 'AVAILABLE');
+      throw error;
+    }
   }
 
   async releaseCompletedTeam(id: string): Promise<IRescueTeam> {
@@ -210,8 +274,11 @@ export class RescueService {
     }
   }
 
-  listAssignments() {
-    return this.data.listAssignments();
+  async listAssignments(ownerUserId?: string) {
+    const assignments = await this.data.listAssignments();
+    return ownerUserId
+      ? assignments.filter((assignment) => (assignment.rescueTeam as unknown as IRescueTeam).userId === ownerUserId)
+      : assignments;
   }
 
   async getAssignment(id: string) {
@@ -225,6 +292,9 @@ export class RescueService {
 
   async updateAssignmentStatus(id: string, status: RescueTeamStatus) {
     const assignment = await this.getAssignment(id);
+    if (assignment.status === 'DECLINED' || assignment.decision !== 'ACCEPTED') {
+      throw new RescueServiceError('The assignment must be accepted before status updates', 409, 'ASSIGNMENT_NOT_ACCEPTED');
+    }
     const nextStatus = getNextAssignmentStatus(assignment.status, status);
     const updated = await this.data.updateAssignment(id, {
       status: nextStatus,
@@ -234,7 +304,7 @@ export class RescueService {
     const teamReference = assignment.rescueTeam as unknown as { _id?: Types.ObjectId };
     await this.data.setTeamStatus(
       String(teamReference._id ?? assignment.rescueTeam),
-      nextStatus
+      nextStatus === 'COMPLETE' ? 'AVAILABLE' : nextStatus
     );
     return updated;
   }

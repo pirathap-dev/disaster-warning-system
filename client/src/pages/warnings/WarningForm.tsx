@@ -61,22 +61,18 @@ export const WarningForm: React.FC<WarningFormProps> = ({
   useEffect(() => {
     if (selectedHazard) {
       setHazardId(selectedHazard._id || selectedHazard.id || '');
-      setAffectedArea(`${selectedHazard.location.district} District`);
+      setAffectedArea(selectedHazard.location.address || selectedHazard.location.district);
+      setMessage(selectedHazard.description);
+      setRecommendedAction('');
       if (selectedHazard.severity === 'CRITICAL') {
         setWarningLevel(WarningLevel.EVACUATE);
         setPriority(WarningPriority.CRITICAL);
-        setMessage(`CRITICAL ALERT: Severe ${selectedHazard.disasterType.toLowerCase()} threat in ${selectedHazard.location.district}. Residents in danger zones must evacuate immediately.`);
-        setRecommendedAction('Proceed immediately to assigned community relief center. Carry vital medicines and documents.');
       } else if (selectedHazard.severity === 'HIGH') {
         setWarningLevel(WarningLevel.WARNING);
         setPriority(WarningPriority.HIGH);
-        setMessage(`HIGH WARNING: Rapidly escalating ${selectedHazard.disasterType.toLowerCase()} in ${selectedHazard.location.district}. Stay on high alert and avoid low ground.`);
-        setRecommendedAction('Prepare evacuation pack, charge communication devices, and monitor emergency broadcast updates.');
       } else {
         setWarningLevel(WarningLevel.WATCH);
         setPriority(WarningPriority.MEDIUM);
-        setMessage(`ADVISORY WATCH: Emerging ${selectedHazard.disasterType.toLowerCase()} conditions identified in ${selectedHazard.location.district}.`);
-        setRecommendedAction('Remain vigilant, monitor water levels and weather advisories.');
       }
     }
   }, [selectedHazard]);

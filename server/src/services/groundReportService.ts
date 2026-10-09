@@ -1,4 +1,5 @@
 import { GroundReportModel, GroundReportDocument } from '../models/GroundReport';
+import { HazardModel } from '../models/Hazard';
 import { IGroundReport, ReportStatus, DisasterType, Location, SeverityLevel } from '../types';
 
 // Haversine formula to calculate distance between two points in kilometers
@@ -49,8 +50,7 @@ export class GroundReportService {
       reportData.duplicateOf = duplicate._id?.toString();
     }
 
-    // Reports go straight to UNDER_REVIEW so DMC officers can act immediately
-    reportData.status = ReportStatus.UNDER_REVIEW;
+    reportData.status = ReportStatus.PENDING;
     const report = new GroundReportModel(reportData);
     return await report.save();
   }
@@ -112,6 +112,7 @@ export class GroundReportService {
   static isValidTransition(currentStatus: ReportStatus, newStatus: ReportStatus): boolean {
     const validTransitions: Record<ReportStatus, ReportStatus[]> = {
       [ReportStatus.SUBMITTED]: [ReportStatus.UNDER_REVIEW], // kept for backward compat
+      [ReportStatus.PENDING]: [ReportStatus.VERIFIED, ReportStatus.REJECTED, ReportStatus.NEEDS_MORE_INFO],
       [ReportStatus.UNDER_REVIEW]: [ReportStatus.VERIFIED, ReportStatus.REJECTED, ReportStatus.NEEDS_MORE_INFO],
       [ReportStatus.NEEDS_MORE_INFO]: [ReportStatus.UNDER_REVIEW],
       [ReportStatus.VERIFIED]: [],
@@ -141,6 +142,35 @@ export class GroundReportService {
       report.verificationTimestamp = new Date();
     }
 
-    return await report.save();
+    const savedReport = await report.save();
+
+    if (newStatus === ReportStatus.VERIFIED) {
+      const locationLabel = report.location.address?.trim() ||
+        `${report.location.latitude.toFixed(5)}, ${report.location.longitude.toFixed(5)}`;
+      await HazardModel.findOneAndUpdate(
+        { sourceReportId: report._id },
+        {
+          $set: {
+            title: `${report.disasterType} Ground Report`,
+            disasterType: report.disasterType,
+            severity: report.severity,
+            location: {
+              district: locationLabel,
+              address: report.location.address,
+              latitude: report.location.latitude,
+              longitude: report.location.longitude,
+            },
+            description: report.description,
+            status: report.status,
+            sourceReportId: report._id,
+            verifiedBy: reviewerId,
+            verifiedAt: report.verificationTimestamp,
+          },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      ).exec();
+    }
+
+    return savedReport;
   }
 }

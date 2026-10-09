@@ -7,9 +7,14 @@ import { Loading } from '../components/ui/Loading';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { useToast } from '../components/ui/Toast';
+import { authenticatedFetch } from '../services/api';
+import { useAuth } from '../auth/AuthContext';
+import { UserRole } from '../types';
+import { warningApi } from '../services/api';
+import type { IWarning } from '../types';
 
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-type Status = 'AVAILABLE' | 'DISPATCHED' | 'EN_ROUTE' | 'ACTIVE' | 'COMPLETE';
+type Status = 'AVAILABLE' | 'DISPATCHED' | 'EN_ROUTE' | 'ACTIVE' | 'COMPLETE' | 'DECLINED';
 
 interface Incident {
   _id: string;
@@ -49,6 +54,7 @@ interface Assignment {
   rescueTeam: string | Team;
   priority: Priority;
   status: Status;
+  decision?: 'PENDING' | 'ACCEPTED' | 'DECLINED';
   assignedAt: string;
   etaMinutes?: number;
   notes?: string;
@@ -65,7 +71,7 @@ const apiBase = `${import.meta.env.VITE_API_URL ?? 'http://localhost:5000/api'}/
 const lifecycle: Status[] = ['DISPATCHED', 'EN_ROUTE', 'ACTIVE', 'COMPLETE'];
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
+  const response = await authenticatedFetch(`${apiBase}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
@@ -92,6 +98,8 @@ function priorityStyle(priority: Priority): string {
 function statusStyle(status: Status): string {
   return status === 'AVAILABLE' || status === 'COMPLETE'
     ? 'bg-emerald-50 text-emerald-800'
+    : status === 'DECLINED'
+      ? 'bg-rose-50 text-rose-800'
     : status === 'ACTIVE'
       ? 'bg-orange-100 text-orange-900'
       : 'bg-sky-100 text-sky-900';
@@ -99,13 +107,17 @@ function statusStyle(status: Status): string {
 
 export default function RescueCoordination() {
   const { toast } = useToast();
+  const { session } = useAuth();
+  const isDistrictOfficer = session?.user.role === UserRole.DISTRICT_OFFICER;
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [activeWarnings, setActiveWarnings] = useState<IWarning[]>([]);
   const [suitability, setSuitability] = useState<Suitability[]>([]);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [replacementTeamId, setReplacementTeamId] = useState('');
   const [etaMinutes, setEtaMinutes] = useState('45');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(true);
@@ -117,14 +129,16 @@ export default function RescueCoordination() {
     setLoading(true);
     setError('');
     try {
-      const [activeIncidents, rescueTeams, rescueAssignments] = await Promise.all([
-        api<Incident[]>('/incidents'),
+      const [activeIncidents, rescueTeams, rescueAssignments, warnings] = await Promise.all([
+        isDistrictOfficer ? api<Incident[]>('/incidents') : Promise.resolve([]),
         api<Team[]>('/teams'),
         api<Assignment[]>('/assignments'),
+        isDistrictOfficer ? warningApi.getWarnings() : Promise.resolve([]),
       ]);
       setIncidents(activeIncidents);
       setTeams(rescueTeams);
       setAssignments(rescueAssignments);
+      setActiveWarnings(warnings.filter((warning) => warning.status === 'ACTIVE' || warning.status === 'UPDATED'));
       setSelectedIncidentId((current) =>
         activeIncidents.some((incident) => incident._id === current)
           ? current
@@ -144,12 +158,12 @@ export default function RescueCoordination() {
 
   useEffect(() => {
     void loadDashboard();
-  }, []);
+  }, [isDistrictOfficer]);
 
   useEffect(() => {
     setSuitability([]);
     setSelectedTeamId('');
-    if (!selectedIncidentId) return;
+    if (!isDistrictOfficer || !selectedIncidentId) return;
     let cancelled = false;
     setLoadingSuitability(true);
     api<Suitability[]>(`/teams/suitable?incidentId=${encodeURIComponent(selectedIncidentId)}`)
@@ -165,7 +179,7 @@ export default function RescueCoordination() {
     return () => {
       cancelled = true;
     };
-  }, [selectedIncidentId, toast]);
+  }, [isDistrictOfficer, selectedIncidentId, toast]);
 
   const incident = incidents.find((item) => item._id === selectedIncidentId);
   const activeAssignment = assignments.find((item) => item._id === selectedAssignmentId);
@@ -198,13 +212,13 @@ export default function RescueCoordination() {
     }
   };
 
-  const advanceAssignment = async () => {
-    if (!activeAssignment) return;
-    const nextStatus = lifecycle[lifecycle.indexOf(activeAssignment.status) + 1];
+  const advanceAssignment = async (assignment = activeAssignment) => {
+    if (!assignment) return;
+    const nextStatus = lifecycle[lifecycle.indexOf(assignment.status) + 1];
     if (!nextStatus) return;
     setSubmitting(true);
     try {
-      await api<Assignment>(`/assignments/${activeAssignment._id}/status`, {
+      await api<Assignment>(`/assignments/${assignment._id}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status: nextStatus }),
       });
@@ -233,6 +247,40 @@ export default function RescueCoordination() {
     }
   };
 
+  const reassignSelected = async () => {
+    if (!activeAssignment || !replacementTeamId) return;
+    setSubmitting(true);
+    try {
+      await api<Assignment>(`/assignments/${activeAssignment._id}/reassign`, {
+        method: 'PATCH',
+        body: JSON.stringify({ teamId: replacementTeamId }),
+      });
+      toast('Dispatch reassigned.', 'success');
+      setReplacementTeamId('');
+      await loadDashboard();
+    } catch (reassignError) {
+      toast(reassignError instanceof Error ? reassignError.message : 'Unable to reassign dispatch.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const decideAssignment = async (assignment: Assignment, decision: 'ACCEPTED' | 'DECLINED') => {
+    setSubmitting(true);
+    try {
+      await api<Assignment>(`/assignments/${assignment._id}/decision`, {
+        method: 'PATCH',
+        body: JSON.stringify({ decision }),
+      });
+      toast(`Dispatch ${decision.toLowerCase()}.`, 'success');
+      await loadDashboard();
+    } catch (decisionError) {
+      toast(decisionError instanceof Error ? decisionError.message : 'Unable to respond to dispatch.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   if (loading) return <Loading />;
   if (error) return <ErrorState message={error} onRetry={() => void loadDashboard()} />;
 
@@ -251,7 +299,21 @@ export default function RescueCoordination() {
         </Button>
       </header>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Rescue overview">
+      {isDistrictOfficer && activeWarnings.length > 0 && (
+        <section className="border-l-4 border-rose-600 bg-rose-50 px-5 py-4" aria-label="Escalated warnings">
+          <h2 className="font-semibold text-rose-950">Escalated warnings</h2>
+          <ul className="mt-2 divide-y divide-rose-200">
+            {activeWarnings.map((warning) => (
+              <li key={warning._id || warning.id} className="py-2">
+                <p className="font-medium text-rose-950">{warning.warningLevel}: {warning.affectedArea}</p>
+                <p className="text-sm text-rose-900">{warning.message}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {isDistrictOfficer && <section className="grid grid-cols-1 gap-3 sm:grid-cols-3" aria-label="Rescue overview">
         <div className="flex items-center gap-4 border-l-4 border-rose-500 bg-white px-5 py-4 shadow-sm">
           <AlertTriangle className="h-5 w-5 text-rose-600" />
           <div><p className="text-2xl font-bold text-slate-900">{incidents.length}</p><p className="text-xs font-medium uppercase text-slate-500">Active incidents</p></div>
@@ -264,9 +326,9 @@ export default function RescueCoordination() {
           <Activity className="h-5 w-5 text-sky-700" />
           <div><p className="text-2xl font-bold text-slate-900">{activeAssignments}</p><p className="text-xs font-medium uppercase text-slate-500">Active assignments</p></div>
         </div>
-      </section>
+      </section>}
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+      {isDistrictOfficer && <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
         <div className="min-w-0 bg-white shadow-sm ring-1 ring-slate-200">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
             <div><h2 className="font-semibold text-slate-900">Incident and team matching</h2><p className="mt-0.5 text-xs text-slate-500">Select an incident to compare response teams.</p></div>
@@ -365,6 +427,19 @@ export default function RescueCoordination() {
                           Advance to {lifecycle[lifecycle.indexOf(activeAssignment.status) + 1]?.replace('_', ' ')} <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
                       )}
+                      {activeAssignment.status === 'DISPATCHED' && isDistrictOfficer && (
+                        <div className="space-y-2 border-t border-slate-100 pt-3">
+                          <Select
+                            label="Replacement team"
+                            value={replacementTeamId}
+                            onChange={(event) => setReplacementTeamId(event.target.value)}
+                            options={teams.filter((team) => team.status === 'AVAILABLE').map((team) => ({ value: team._id, label: team.name }))}
+                          />
+                          <Button variant="secondary" className="w-full" onClick={() => void reassignSelected()} disabled={submitting || !replacementTeamId}>
+                            Reassign pending dispatch
+                          </Button>
+                        </div>
+                      )}
                       {activeAssignment.completedAt && <p className="flex items-center gap-2 text-sm font-medium text-emerald-800"><Check className="h-4 w-4" />Completed {new Date(activeAssignment.completedAt).toLocaleString()}</p>}
                     </>
                   )}
@@ -382,7 +457,34 @@ export default function RescueCoordination() {
             </div>
           </div>
         </div>
-      </section>
+      </section>}
+
+      {!isDistrictOfficer && (
+        <section className="divide-y divide-slate-200 border-y border-slate-200" aria-label="My rescue assignments">
+          {assignments.length === 0 ? (
+            <EmptyState title="No assigned operations" description="Dispatches assigned to your team will appear here." />
+          ) : assignments.map((assignment) => (
+            <article key={assignment._id} className="space-y-3 py-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div><h2 className="font-semibold text-slate-900">{typeof assignment.incident === 'string' ? 'Rescue assignment' : assignment.incident.title}</h2><p className="text-sm text-slate-600">{typeof assignment.incident === 'string' ? '' : assignment.incident.locationName}</p></div>
+                <span className={`rounded px-2 py-1 text-xs font-semibold ${statusStyle(assignment.status)}`}>{assignment.status.replace('_', ' ')}</span>
+              </div>
+              {assignment.decision === 'PENDING' && (
+                <div className="flex gap-2">
+                  <Button onClick={() => void decideAssignment(assignment, 'ACCEPTED')} disabled={submitting}>Accept dispatch</Button>
+                  <Button variant="secondary" onClick={() => void decideAssignment(assignment, 'DECLINED')} disabled={submitting}>Decline dispatch</Button>
+                </div>
+              )}
+              {assignment.decision === 'ACCEPTED' && assignment.status !== 'COMPLETE' && (
+                <Button variant="secondary" onClick={() => void advanceAssignment(assignment)} disabled={submitting}>
+                  Advance to {lifecycle[lifecycle.indexOf(assignment.status) + 1]?.replace('_', ' ')} <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              )}
+              {assignment.status === 'COMPLETE' && <p className="text-sm font-medium text-emerald-800">Operation complete. Team returned to AVAILABLE.</p>}
+            </article>
+          ))}
+        </section>
+      )}
     </div>
   );
 }

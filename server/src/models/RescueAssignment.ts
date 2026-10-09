@@ -2,6 +2,7 @@ import mongoose, { Document, Schema, Types } from 'mongoose';
 import { Coordinates, RescueTeamStatus } from '../services/rescueSuitability';
 
 export type AssignmentPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+export type AssignmentStatus = RescueTeamStatus | 'DECLINED';
 
 export interface IRescueAssignment extends Document {
   incident: Types.ObjectId;
@@ -9,7 +10,8 @@ export interface IRescueAssignment extends Document {
   priority: AssignmentPriority;
   location: Coordinates;
   createdBy: string;
-  status: RescueTeamStatus;
+  status: AssignmentStatus;
+  decision: 'PENDING' | 'ACCEPTED' | 'DECLINED';
   assignedAt: Date;
   etaMinutes?: number;
   notes?: string;
@@ -28,10 +30,11 @@ const rescueAssignmentSchema = new Schema<IRescueAssignment>(
     createdBy: { type: String, required: true, trim: true },
     status: {
       type: String,
-      enum: ['AVAILABLE', 'DISPATCHED', 'EN_ROUTE', 'ACTIVE', 'COMPLETE'],
+      enum: ['AVAILABLE', 'DISPATCHED', 'EN_ROUTE', 'ACTIVE', 'COMPLETE', 'DECLINED'],
       default: 'DISPATCHED',
       required: true,
     },
+    decision: { type: String, enum: ['PENDING', 'ACCEPTED', 'DECLINED'], default: 'PENDING', required: true },
     assignedAt: { type: Date, required: true, default: Date.now },
     etaMinutes: { type: Number, min: 1 },
     notes: { type: String, trim: true, maxlength: 1000 },

@@ -2,6 +2,7 @@ import { Document, Schema, model } from 'mongoose';
 import { ShelterStatus } from '../types';
 
 export interface IShelter extends Document {
+  coordinatorUserId?: string;
   name: string;
   location: string;
   capacity: number;
@@ -13,6 +14,7 @@ export interface IShelter extends Document {
 
 const shelterSchema = new Schema<IShelter>(
   {
+    coordinatorUserId: { type: String, index: true, sparse: true },
     name: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true },
     capacity: { type: Number, required: true, min: 1, validate: Number.isInteger },

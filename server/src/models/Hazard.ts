@@ -21,6 +21,7 @@ const HazardSchema = new Schema<IHazardDocument>(
       default: ReportStatus.VERIFIED,
       index: true,
     },
+    sourceReportId: { type: Schema.Types.ObjectId, ref: 'GroundReport', unique: true, sparse: true },
     verifiedBy: { type: String },
     verifiedAt: { type: Date, default: Date.now },
   },

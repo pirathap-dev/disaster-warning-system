@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { GroundReportService } from '../services/groundReportService';
+import { UserRole } from '../types';
+
+const isDmc = (role?: UserRole) => role === UserRole.DMC_DUTY_OFFICER || role === UserRole.DMC_OFFICER;
 
 export const createReport = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const report = await GroundReportService.createReport(req.body);
+    const report = await GroundReportService.createReport({ ...req.body, reporterId: req.user!.id });
     res.status(201).json({ success: true, data: report });
   } catch (error) {
     next(error);
@@ -12,10 +15,10 @@ export const createReport = async (req: Request, res: Response, next: NextFuncti
 
 export const getReports = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, reporterId } = req.query;
+    const { status } = req.query;
     const filters: Record<string, unknown> = {};
     if (status) filters.status = status;
-    if (reporterId) filters.reporterId = reporterId;
+    if (!isDmc(req.user?.role)) filters.reporterId = req.user!.id;
 
     const reports = await GroundReportService.getReports(filters);
     res.status(200).json({ success: true, data: reports });
@@ -31,6 +34,10 @@ export const getReport = async (req: Request, res: Response, next: NextFunction)
       res.status(404).json({ success: false, error: { message: 'Report not found', code: 'NOT_FOUND' } });
       return;
     }
+    if (!isDmc(req.user?.role) && report.reporterId !== req.user?.id) {
+      res.status(403).json({ success: false, error: { message: 'You can only view your own reports', code: 'FORBIDDEN' } });
+      return;
+    }
     res.status(200).json({ success: true, data: report });
   } catch (error) {
     next(error);
@@ -39,8 +46,8 @@ export const getReport = async (req: Request, res: Response, next: NextFunction)
 
 export const editReport = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { reporterId, ...updates } = req.body;
-    const report = await GroundReportService.editReport(req.params.id, reporterId, updates);
+    const { reporterId: _ignored, ...updates } = req.body;
+    const report = await GroundReportService.editReport(req.params.id, req.user!.id, updates);
     res.status(200).json({ success: true, data: report });
   } catch (error) {
     next(error);
@@ -50,8 +57,7 @@ export const editReport = async (req: Request, res: Response, next: NextFunction
 export const deleteReport = async (req: Request, res: Response, next: NextFunction) => {
   try {
     // reporterId comes from query param or body (no auth middleware yet)
-    const reporterId = (req.query.reporterId as string) || req.body.reporterId;
-    await GroundReportService.deleteReport(req.params.id, reporterId);
+    await GroundReportService.deleteReport(req.params.id, req.user!.id);
     res.status(200).json({ success: true, message: 'Report deleted' });
   } catch (error) {
     next(error);
@@ -60,8 +66,8 @@ export const deleteReport = async (req: Request, res: Response, next: NextFuncti
 
 export const updateStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, reviewerId, remarks } = req.body;
-    const report = await GroundReportService.updateStatus(req.params.id, status, reviewerId, remarks);
+    const { status, remarks } = req.body;
+    const report = await GroundReportService.updateStatus(req.params.id, status, req.user!.id, remarks);
     res.status(200).json({ success: true, data: report });
   } catch (error) {
     next(error);

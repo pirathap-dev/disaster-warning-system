@@ -1,8 +1,12 @@
 export enum UserRole {
   CITIZEN = 'CITIZEN',
+  VOLUNTEER = 'VOLUNTEER',
+  DMC_DUTY_OFFICER = 'DMC_DUTY_OFFICER',
   DMC_OFFICER = 'DMC_OFFICER',
   DISTRICT_OFFICER = 'DISTRICT_OFFICER',
+  RESCUE_TEAM = 'RESCUE_TEAM',
   SHELTER_COORDINATOR = 'SHELTER_COORDINATOR',
+  RESOURCE_ORGANIZATION = 'RESOURCE_ORGANIZATION',
 }
 
 export interface User {
@@ -27,6 +31,7 @@ export interface ApiResponse<T = any> {
 }
 
 export enum ReportStatus {
+  PENDING = 'PENDING',
   SUBMITTED = 'SUBMITTED',
   UNDER_REVIEW = 'UNDER_REVIEW',
   VERIFIED = 'VERIFIED',
@@ -132,6 +137,7 @@ export enum NotificationDeliveryStatus {
 export interface IHazard {
   _id?: string;
   id?: string;
+  sourceReportId?: string;
   title: string;
   disasterType: string;
   severity: string;

@@ -1,3 +1,5 @@
+import { authenticatedFetch } from '../services/api';
+
 export type ShelterStatus = 'OPEN' | 'CLOSED';
 export type ShelterCapacityStatus = 'OPEN' | 'NEAR_FULL' | 'FULL' | 'CLOSED';
 export type ReliefAllocationStatus =
@@ -27,6 +29,7 @@ export interface ReliefResource {
   availableQuantity: number;
   unit: string;
   source?: string;
+  ownerUserId?: string;
 }
 
 export interface ReliefAllocation {
@@ -57,7 +60,7 @@ interface ApiResponse<T> {
 const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await authenticatedFetch(`${apiBaseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -75,6 +78,26 @@ export const reliefApi = {
   getShelters: () => request<Shelter[]>('/shelters'),
   getResources: () => request<ReliefResource[]>('/relief-resources'),
   getAllocations: () => request<ReliefAllocation[]>('/relief-allocations'),
+  updateOccupancy: (id: string, currentOccupancy: number) =>
+    request<Shelter>(`/shelters/${id}/occupancy`, {
+      method: 'PATCH',
+      body: JSON.stringify({ currentOccupancy }),
+    }),
+  createResource: (resource: {
+    name: string;
+    category: string;
+    availableQuantity: number;
+    unit: string;
+    source?: string;
+  }) => request<ReliefResource>('/relief-resources', {
+    method: 'POST',
+    body: JSON.stringify(resource),
+  }),
+  updateResource: (id: string, updates: Partial<Pick<ReliefResource, 'name' | 'category' | 'availableQuantity' | 'unit' | 'source'>>) =>
+    request<ReliefResource>(`/relief-resources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
   createAllocation: (allocation: {
     shelterId: string;
     resourceId: string;

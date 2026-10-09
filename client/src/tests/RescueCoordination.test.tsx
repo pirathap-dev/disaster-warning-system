@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/ui/Toast';
 import RescueCoordination from '../pages/RescueCoordination';
 
+vi.mock('../auth/AuthContext', () => ({
+  useAuth: () => ({ session: { user: { role: 'DISTRICT_OFFICER', id: 'district-1' } } }),
+  getAuthToken: () => undefined,
+}));
+
 const incident = {
   _id: '65a000000000000000000001',
   title: 'River flooding',
@@ -67,6 +72,7 @@ describe('rescue coordination workflow', () => {
       if (url.endsWith('/teams')) return response([team]);
       if (url.endsWith('/assignments') && init?.method === 'POST') return response(assignment, 201);
       if (url.endsWith('/assignments')) return response([]);
+      if (url.endsWith('/warnings')) return response([]);
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -95,6 +101,7 @@ describe('rescue coordination workflow', () => {
       if (url.endsWith('/incidents')) return response([]);
       if (url.endsWith('/teams')) return response([]);
       if (url.endsWith('/assignments')) return response([]);
+      if (url.includes('/warnings')) return response([]);
       throw new Error(`Unexpected request: ${url}`);
     }));
 

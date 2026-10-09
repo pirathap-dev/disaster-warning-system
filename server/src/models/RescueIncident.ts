@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 import { Coordinates } from '../services/rescueSuitability';
 
 export interface IRescueIncident extends Document {
+  sourceWarningId?: string;
   title: string;
   locationName: string;
   location: Coordinates;
@@ -12,6 +13,7 @@ export interface IRescueIncident extends Document {
 
 const rescueIncidentSchema = new Schema<IRescueIncident>(
   {
+    sourceWarningId: { type: String, unique: true, sparse: true, index: true },
     title: { type: String, required: true, trim: true },
     locationName: { type: String, required: true, trim: true },
     location: {

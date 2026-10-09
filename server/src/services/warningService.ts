@@ -1,6 +1,8 @@
 import { HazardModel } from '../models/Hazard';
+import { GroundReportModel } from '../models/GroundReport';
 import { WarningModel, IWarningDocument } from '../models/Warning';
 import { NotificationModel } from '../models/Notification';
+import { RescueIncidentModel } from '../models/RescueIncident';
 import {
   WarningLevel,
   WarningPriority,
@@ -40,7 +42,7 @@ export class WarningService {
    * Validate user role. DMC Duty Officer is the primary actor.
    */
   static validateOfficerRole(role?: string): void {
-    if (role && role !== UserRole.DMC_OFFICER) {
+    if (role && role !== UserRole.DMC_DUTY_OFFICER && role !== UserRole.DMC_OFFICER) {
       throw new WarningServiceError(
         'Access denied. Only DMC Duty Officers are authorized to manage public warnings.',
         403,
@@ -419,6 +421,34 @@ export class WarningService {
     }
 
     const saved = await warning.save();
+    if (newStatus === WarningStatus.ACTIVE) {
+      const hazard = await this.validateHazardReference(String(saved.hazardId));
+      const capabilitiesByHazard: Record<string, string[]> = {
+        FLOOD: ['water rescue'],
+        TSUNAMI: ['water rescue', 'evacuation'],
+        FIRE: ['fire suppression'],
+        EARTHQUAKE: ['urban search and rescue'],
+        CYCLONE: ['evacuation'],
+      };
+      await RescueIncidentModel.findOneAndUpdate(
+        { sourceWarningId: saved._id.toString() },
+        {
+          $setOnInsert: {
+            sourceWarningId: saved._id.toString(),
+            title: `${hazard.disasterType} warning response`,
+            locationName: hazard.location.district,
+            location: {
+              latitude: hazard.location.latitude,
+              longitude: hazard.location.longitude,
+            },
+            requiredCapabilities: capabilitiesByHazard[hazard.disasterType] || ['emergency response'],
+            priority: saved.priority,
+            status: 'ACTIVE',
+          },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).exec();
+    }
     return this.enrichWarningWithSummary(saved);
   }
 
@@ -642,69 +672,34 @@ export class WarningService {
    * List verified hazards for assessment by DMC Officer.
    */
   static async getVerifiedHazards() {
-    let hazards = await HazardModel.find({ status: ReportStatus.VERIFIED }).sort({ createdAt: -1 }).exec();
+    const reports = await GroundReportModel.find({ status: ReportStatus.VERIFIED }).sort({ verificationTimestamp: -1 }).exec();
+    const hazards = await Promise.all(reports.map((report) => {
+      const locationLabel = report.location.address?.trim() ||
+        `${report.location.latitude.toFixed(5)}, ${report.location.longitude.toFixed(5)}`;
 
-    // If database is completely empty (first run), seed realistic verified hazards
-    if (hazards.length === 0) {
-      hazards = await this.seedInitialHazards();
-    }
+      return HazardModel.findOneAndUpdate(
+        { sourceReportId: report._id },
+        {
+          $set: {
+            title: `${report.disasterType} Ground Report`,
+            disasterType: report.disasterType,
+            severity: report.severity,
+            location: {
+              district: locationLabel,
+              latitude: report.location.latitude,
+              longitude: report.location.longitude,
+            },
+            description: report.description,
+            status: report.status,
+            sourceReportId: report._id,
+            verifiedBy: report.reviewerId,
+            verifiedAt: report.verificationTimestamp,
+          },
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      ).exec();
+    }));
 
     return hazards;
-  }
-
-  /**
-   * Helper: Seed realistic verified hazards.
-   */
-  static async seedInitialHazards() {
-    const seedData = [
-      {
-        title: 'Kelani River Rapid Rise & Inundation',
-        disasterType: 'FLOOD',
-        severity: 'HIGH',
-        location: {
-          district: 'Colombo & Gampaha',
-          address: 'Nagalagam Street & Hanwella Reach',
-          latitude: 6.9538,
-          longitude: 79.8864,
-        },
-        description: 'Water levels at Hanwella hydrometric station reached major flood threshold (9.2m). Low-lying residential sectors facing immediate overflow.',
-        status: ReportStatus.VERIFIED,
-        verifiedBy: 'DMC Duty Hydrologist #DMC-H12',
-        verifiedAt: new Date(Date.now() - 3600000 * 2),
-      },
-      {
-        title: 'Badulla Passara Slope Instability & Landslide Risk',
-        disasterType: 'LANDSLIDE',
-        severity: 'CRITICAL',
-        location: {
-          district: 'Badulla',
-          address: 'Passara - Namunukula Mountain Corridor',
-          latitude: 6.9895,
-          longitude: 81.0557,
-        },
-        description: 'NBRO Level 3 Red evacuation alert issued. Surface fissures detected on tea estate slopes following 180mm rainfall in 24 hours.',
-        status: ReportStatus.VERIFIED,
-        verifiedBy: 'NBRO Geotechnical Officer #NBRO-B04',
-        verifiedAt: new Date(Date.now() - 3600000 * 4),
-      },
-      {
-        title: 'Southern Coastal Gale & High Energy Swell Surges',
-        disasterType: 'TSUNAMI_SURGE',
-        severity: 'MODERATE',
-        location: {
-          district: 'Galle & Matara',
-          address: 'Coastal belt from Hikkaduwa to Dondra Head',
-          latitude: 6.0535,
-          longitude: 80.221,
-        },
-        description: 'Deep depression in southwest Bay of Bengal producing 3.5m storm surges and severe coastal beach erosion. Fishing communities at risk.',
-        status: ReportStatus.VERIFIED,
-        verifiedBy: 'Meteorological Dept Duty Forecaster #MET-C08',
-        verifiedAt: new Date(Date.now() - 3600000 * 6),
-      },
-    ];
-
-    const inserted = await HazardModel.insertMany(seedData);
-    return inserted;
   }
 }

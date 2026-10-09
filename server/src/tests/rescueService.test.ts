@@ -39,6 +39,7 @@ const assignment = {
   incident: incident._id,
   rescueTeam: team._id,
   status: 'DISPATCHED',
+  decision: 'ACCEPTED',
   priority: 'HIGH',
   location,
   createdBy: 'District Officer',
@@ -199,7 +200,7 @@ describe('rescue assignment business rules', () => {
       status: 'COMPLETE',
       completedAt: expect.any(Date),
     }));
-    expect(data.setTeamStatus).toHaveBeenCalledWith(teamId, 'COMPLETE');
+    expect(data.setTeamStatus).toHaveBeenCalledWith(teamId, 'AVAILABLE');
   });
 
   it('releases a completed team for reuse', async () => {

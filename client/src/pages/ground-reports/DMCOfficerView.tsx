@@ -9,7 +9,7 @@ import { Loading } from '../../components/ui/Loading';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { useToast } from '../../components/ui/Toast';
 
-const DMC_OFFICER_ID = 'officer_456'; // Replace with real auth later
+import { useAuth } from '../../auth/AuthContext';
 
 function statusVariant(status: string) {
   switch (status) {
@@ -17,6 +17,7 @@ function statusVariant(status: string) {
     case 'REJECTED': return 'danger';
     case 'NEEDS_MORE_INFO': return 'warning';
     case 'UNDER_REVIEW': return 'info';
+    case 'PENDING': return 'info';
     default: return 'default';
   }
 }
@@ -38,6 +39,7 @@ export default function DMCOfficerView() {
   const [reviewRemarks, setReviewRemarks] = useState('');
   const [processing, setProcessing] = useState(false);
   const { toast } = useToast();
+  const { session } = useAuth();
 
   const fetchReports = async () => {
     setLoading(true);
@@ -59,7 +61,7 @@ export default function DMCOfficerView() {
     }
     setProcessing(true);
     try {
-      const res = await GroundReportApi.updateStatus(selectedReport._id, status, DMC_OFFICER_ID, reviewRemarks.trim() || undefined);
+      const res = await GroundReportApi.updateStatus(selectedReport._id, status, session?.user.id || '', reviewRemarks.trim() || undefined);
       if (res.success) {
         toast(`Report marked as ${status.replace('_', ' ')}`, 'success');
         setSelectedReport(null);
@@ -80,7 +82,7 @@ export default function DMCOfficerView() {
     : reports;
 
   const actionable = selectedReport
-    ? (selectedReport.status === ReportStatus.UNDER_REVIEW
+    ? ([ReportStatus.PENDING, ReportStatus.UNDER_REVIEW].includes(selectedReport.status)
         ? [ReportStatus.VERIFIED, ReportStatus.REJECTED, ReportStatus.NEEDS_MORE_INFO]
         : selectedReport.status === ReportStatus.NEEDS_MORE_INFO
           ? [ReportStatus.UNDER_REVIEW]

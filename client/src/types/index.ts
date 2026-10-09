@@ -1,8 +1,12 @@
 export enum UserRole {
   CITIZEN = 'CITIZEN',
+  VOLUNTEER = 'VOLUNTEER',
+  DMC_DUTY_OFFICER = 'DMC_DUTY_OFFICER',
   DMC_OFFICER = 'DMC_OFFICER',
   DISTRICT_OFFICER = 'DISTRICT_OFFICER',
+  RESCUE_TEAM = 'RESCUE_TEAM',
   SHELTER_COORDINATOR = 'SHELTER_COORDINATOR',
+  RESOURCE_ORGANIZATION = 'RESOURCE_ORGANIZATION',
 }
 
 export interface User {
@@ -12,6 +16,7 @@ export interface User {
   role: UserRole;
   phone?: string;
   district?: string;
+  testAccess?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

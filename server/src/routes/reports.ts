@@ -3,14 +3,26 @@ import { body } from 'express-validator';
 import { DisasterType, SeverityLevel, ReportStatus } from '../types';
 import { validateRequest } from '../middleware/validate';
 import * as controller from '../controllers/groundReportController';
+import { allowRoles, authenticate } from '../middleware/auth';
+import { UserRole } from '../types';
 
 const router = Router();
+const authenticated = authenticate;
+const reportSubmitters = allowRoles(UserRole.CITIZEN, UserRole.VOLUNTEER);
+const dmcOfficers = allowRoles(UserRole.DMC_DUTY_OFFICER, UserRole.DMC_OFFICER);
+const reportReaders = allowRoles(
+  UserRole.CITIZEN,
+  UserRole.VOLUNTEER,
+  UserRole.DMC_DUTY_OFFICER,
+  UserRole.DMC_OFFICER
+);
 
 // Create a new ground report
 router.post(
   '/',
+  authenticated,
+  reportSubmitters,
   [
-    body('reporterId').notEmpty().withMessage('Reporter ID is required'),
     body('disasterType').isIn(Object.values(DisasterType)).withMessage('Invalid disaster type'),
     body('description').notEmpty().withMessage('Description is required'),
     body('severity').isIn(Object.values(SeverityLevel)).withMessage('Invalid severity level'),
@@ -22,14 +34,15 @@ router.post(
 );
 
 // Get all reports (with optional filters: ?status=UNDER_REVIEW&reporterId=citizen_123)
-router.get('/', controller.getReports);
-router.get('/:id', controller.getReport);
+router.get('/', authenticated, reportReaders, controller.getReports);
+router.get('/:id', authenticated, reportReaders, controller.getReport);
 
 // Edit a report (citizen only, status must be UNDER_REVIEW or NEEDS_MORE_INFO)
 router.put(
   '/:id',
+  authenticated,
+  reportSubmitters,
   [
-    body('reporterId').notEmpty().withMessage('Reporter ID is required'),
     body('disasterType').optional().isIn(Object.values(DisasterType)).withMessage('Invalid disaster type'),
     body('description').optional().notEmpty().withMessage('Description cannot be empty'),
     body('severity').optional().isIn(Object.values(SeverityLevel)).withMessage('Invalid severity level'),
@@ -41,14 +54,15 @@ router.put(
 );
 
 // Delete a report (citizen only, status must be UNDER_REVIEW)
-router.delete('/:id', controller.deleteReport);
+router.delete('/:id', authenticated, reportSubmitters, controller.deleteReport);
 
 // DMC Officer: update report status
 router.patch(
   '/:id/status',
+  authenticated,
+  dmcOfficers,
   [
     body('status').isIn(Object.values(ReportStatus)).withMessage('Invalid status'),
-    body('reviewerId').notEmpty().withMessage('Reviewer ID is required'),
     body('remarks').optional().isString()
   ],
   validateRequest,

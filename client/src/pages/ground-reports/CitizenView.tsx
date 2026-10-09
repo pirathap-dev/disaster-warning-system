@@ -13,7 +13,6 @@ import { useToast } from '../../components/ui/Toast';
 
 // Statuses where citizen can still edit/delete
 const EDITABLE_STATUSES: ReportStatus[] = [ReportStatus.UNDER_REVIEW, ReportStatus.NEEDS_MORE_INFO];
-const CITIZEN_ID = 'citizen_123'; // Replace with real auth later
 
 function statusVariant(status: string) {
   switch (status) {
@@ -21,6 +20,7 @@ function statusVariant(status: string) {
     case 'REJECTED': return 'danger';
     case 'NEEDS_MORE_INFO': return 'warning';
     case 'UNDER_REVIEW': return 'info';
+    case 'PENDING': return 'info';
     default: return 'default';
   }
 }
@@ -39,7 +39,7 @@ export default function CitizenView() {
     setLoading(true);
     setError(false);
     try {
-      const res = await GroundReportApi.getAll(CITIZEN_ID);
+      const res = await GroundReportApi.getAll();
       if (res.success && res.data) {
         setReports(res.data);
       } else {
@@ -58,7 +58,7 @@ export default function CitizenView() {
     if (!deletingReport) return;
     setDeleteLoading(true);
     try {
-      const res = await GroundReportApi.delete(deletingReport._id, CITIZEN_ID);
+      const res = await GroundReportApi.delete(deletingReport._id, '');
       if (res.success) {
         toast('Report deleted successfully', 'success');
         setDeletingReport(null);

@@ -3,15 +3,22 @@ import { body } from 'express-validator';
 import { WarningController } from '../controllers/warningController';
 import { validateRequest } from '../middleware/validate';
 import { WarningLevel, WarningPriority, WarningStatus } from '../types';
+import { allowRoles, authenticate } from '../middleware/auth';
+import { UserRole } from '../types';
 
 const router = Router();
+const signedIn = authenticate;
+const readers = allowRoles(UserRole.CITIZEN, UserRole.VOLUNTEER, UserRole.DMC_DUTY_OFFICER, UserRole.DMC_OFFICER, UserRole.DISTRICT_OFFICER);
+const officers = allowRoles(UserRole.DMC_DUTY_OFFICER, UserRole.DMC_OFFICER);
 
 // 1. Get verified hazards for assessment
-router.get('/hazards', WarningController.getVerifiedHazards);
+router.get('/hazards', signedIn, officers, WarningController.getVerifiedHazards);
 
 // 2. Create warning
 router.post(
   '/',
+  signedIn,
+  officers,
   [
     body('hazardId').notEmpty().withMessage('Related hazard ID is required'),
     body('warningLevel')
@@ -57,14 +64,16 @@ router.post(
 );
 
 // 3. Get all warnings
-router.get('/', WarningController.getWarnings);
+router.get('/', signedIn, readers, WarningController.getWarnings);
 
 // 4. Get warning by ID
-router.get('/:id', WarningController.getWarningById);
+router.get('/:id', signedIn, readers, WarningController.getWarningById);
 
 // 5. Update warning content
 router.patch(
   '/:id',
+  signedIn,
+  officers,
   [
     body('warningLevel')
       .optional()
@@ -96,6 +105,8 @@ router.patch(
 // 6. Update warning status
 router.patch(
   '/:id/status',
+  signedIn,
+  officers,
   [
     body('status')
       .notEmpty()
@@ -107,9 +118,9 @@ router.patch(
 );
 
 // 7. Get notification delivery records and summary
-router.get('/:id/notifications', WarningController.getNotifications);
+router.get('/:id/notifications', signedIn, officers, WarningController.getNotifications);
 
 // 8. Simulate notification delivery progression
-router.post('/:id/notifications/simulate', WarningController.simulateNotifications);
+router.post('/:id/notifications/simulate', signedIn, officers, WarningController.simulateNotifications);
 
 export default router;

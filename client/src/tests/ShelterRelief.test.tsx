@@ -10,6 +10,10 @@ const { api, toast } = vi.hoisted(() => ({
     createAllocation: vi.fn(),
     updateStatus: vi.fn(),
     confirmReceipt: vi.fn(),
+    updateOccupancy: vi.fn(),
+    createResource: vi.fn(),
+    updateResource: vi.fn(),
+    auth: { role: 'DISTRICT_OFFICER' as string },
   },
   toast: vi.fn(),
 }));
@@ -17,6 +21,10 @@ const { api, toast } = vi.hoisted(() => ({
 vi.mock('../types/relief', () => ({ reliefApi: api }));
 vi.mock('../components/ui/Toast', () => ({
   useToast: () => ({ toast }),
+}));
+vi.mock('../auth/AuthContext', () => ({
+  useAuth: () => ({ session: { user: { role: api.auth.role, id: 'district-1', name: 'Officer' } } }),
+  getAuthToken: () => undefined,
 }));
 
 const shelter = {
@@ -55,6 +63,7 @@ const allocation = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.auth.role = 'DISTRICT_OFFICER';
   api.getShelters.mockResolvedValue([shelter]);
   api.getResources.mockResolvedValue([resource]);
   api.getAllocations.mockResolvedValue([allocation]);
@@ -123,10 +132,10 @@ describe('Shelter & Relief workspace', () => {
   });
 
   it('lets the coordinator confirm a dispatched quantity received at the shelter', async () => {
+    api.auth.role = 'SHELTER_COORDINATOR';
     api.getAllocations.mockResolvedValue([{ ...allocation, status: 'DISPATCHED' }]);
     render(<ShelterRelief />);
-    await screen.findByRole('heading', { name: 'Central Shelter' });
-    fireEvent.click(screen.getByRole('tab', { name: 'Shelter Coordinator' }));
+    await screen.findByRole('heading', { name: 'Incoming deliveries' });
 
     fireEvent.change(screen.getByLabelText('Received quantity for Drinking Water'), {
       target: { value: '35' },

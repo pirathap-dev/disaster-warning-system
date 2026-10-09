@@ -12,8 +12,6 @@ interface EditReportFormProps {
   onCancel: () => void;
 }
 
-const CITIZEN_ID = 'citizen_123';
-
 export default function EditReportForm({ report, onSuccess, onCancel }: EditReportFormProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -51,7 +49,7 @@ export default function EditReportForm({ report, onSuccess, onCancel }: EditRepo
 
     setLoading(true);
     try {
-      const res = await GroundReportApi.edit(report._id, CITIZEN_ID, {
+      const res = await GroundReportApi.edit(report._id, '', {
         disasterType,
         severity,
         description,

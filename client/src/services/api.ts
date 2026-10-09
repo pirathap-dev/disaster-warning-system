@@ -8,13 +8,25 @@ import {
   IWarningDeliverySummary,
   INotificationRecord,
 } from '../types';
+import { getAuthToken } from '../auth/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+export function authenticatedFetch(input: RequestInfo | URL, options: RequestInit = {}) {
+  const token = getAuthToken();
+  return fetch(input, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
+
 export const GroundReportApi = {
   async create(data: Partial<IGroundReport>): Promise<ApiResponse<IGroundReport>> {
-    const response = await fetch(`${API_URL}/reports`, {
+    const response = await authenticatedFetch(`${API_URL}/reports`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -26,7 +38,7 @@ export const GroundReportApi = {
     const url = reporterId
       ? `${API_URL}/reports?reporterId=${encodeURIComponent(reporterId)}`
       : `${API_URL}/reports`;
-    const response = await fetch(url);
+    const response = await authenticatedFetch(url);
     return response.json();
   },
 
@@ -35,7 +47,7 @@ export const GroundReportApi = {
     reporterId: string,
     updates: Partial<IGroundReport>
   ): Promise<ApiResponse<IGroundReport>> {
-    const response = await fetch(`${API_URL}/reports/${id}`, {
+    const response = await authenticatedFetch(`${API_URL}/reports/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reporterId, ...updates })
@@ -44,7 +56,7 @@ export const GroundReportApi = {
   },
 
   async delete(id: string, reporterId: string): Promise<ApiResponse<null>> {
-    const response = await fetch(
+    const response = await authenticatedFetch(
       `${API_URL}/reports/${id}?reporterId=${encodeURIComponent(reporterId)}`,
       { method: 'DELETE' }
     );
@@ -57,7 +69,7 @@ export const GroundReportApi = {
     reviewerId: string,
     remarks?: string
   ): Promise<ApiResponse<IGroundReport>> {
-    const response = await fetch(`${API_URL}/reports/${id}/status`, {
+    const response = await authenticatedFetch(`${API_URL}/reports/${id}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, reviewerId, remarks })
@@ -83,11 +95,10 @@ export class ApiError extends Error {
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers = {
     'Content-Type': 'application/json',
-    'x-user-role': 'DMC_OFFICER',
     ...(options.headers || {}),
   };
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await authenticatedFetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers,
   });
@@ -172,4 +183,4 @@ export const warningApi = {
     }>(`/warnings/${id}/notifications/simulate`, {
       method: 'POST',
     }),
-};};
+};

@@ -17,6 +17,7 @@ import { Loading } from '../components/ui/Loading';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { useToast } from '../components/ui/Toast';
+import { useAuth } from '../auth/AuthContext';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/Table';
 
 import { warningApi, ApiError } from '../services/api';
@@ -37,6 +38,8 @@ import { NotificationTrackingView } from './warnings/NotificationTrackingView';
 
 export default function Warnings() {
   const { toast } = useToast();
+  const { session } = useAuth();
+  const isCitizen = session?.user.role === 'CITIZEN' || session?.user.role === 'VOLUNTEER';
 
   // Navigation & View States
   const [activeTab, setActiveTab] = useState<'hazards' | 'warnings' | 'create' | 'tracking'>('warnings');
@@ -74,10 +77,8 @@ export default function Warnings() {
     setLoading(true);
     setError(null);
     try {
-      const [hazardsRes, warningsRes] = await Promise.all([
-        warningApi.getVerifiedHazards(),
-        warningApi.getWarnings(),
-      ]);
+      const warningsRes = await warningApi.getWarnings();
+      const hazardsRes = isCitizen ? [] : await warningApi.getVerifiedHazards();
       setHazards(hazardsRes);
       setWarnings(warningsRes);
     } catch (err: unknown) {
@@ -87,7 +88,7 @@ export default function Warnings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isCitizen]);
 
   useEffect(() => {
     fetchData();
@@ -273,6 +274,46 @@ export default function Warnings() {
           message={error}
           onRetry={fetchData}
         />
+      </div>
+    );
+  }
+
+  if (isCitizen) {
+    const visibleWarnings = warnings.filter((warning) =>
+      [WarningStatus.PUBLISHED, WarningStatus.ACTIVE, WarningStatus.UPDATED].includes(warning.status)
+    );
+    return (
+      <div className="space-y-5">
+        <header className="border-b border-slate-200 pb-4">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase text-red-800">
+            <ShieldAlert className="h-4 w-4" /> Public alerts
+          </div>
+          <h1 className="mt-2 text-2xl font-bold text-slate-900">Warnings for your area</h1>
+        </header>
+        {visibleWarnings.length === 0 ? (
+          <EmptyState title="No active warnings" description="Published emergency warnings will appear here." />
+        ) : (
+          <div className="divide-y divide-slate-200 border-y border-slate-200">
+            {visibleWarnings.map((warning) => (
+              <article key={warning._id || warning.id} className="grid gap-3 py-5 sm:grid-cols-[1fr_auto]">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {getLevelBadge(warning.warningLevel)}
+                    <Badge variant={warning.status === WarningStatus.PUBLISHED ? 'info' : 'danger'}>
+                      {warning.status}
+                    </Badge>
+                    <span className="text-sm text-slate-600">{warning.affectedArea}</span>
+                  </div>
+                  <p className="mt-3 font-semibold text-slate-900">{warning.message}</p>
+                  <p className="mt-1 text-sm text-slate-700">{warning.recommendedAction}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Expires {new Date(warning.expiryTime).toLocaleString()}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

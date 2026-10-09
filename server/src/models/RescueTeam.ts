@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from 'mongoose';
 import { Coordinates, RescueTeamStatus } from '../services/rescueSuitability';
 
 export interface IRescueTeam extends Document {
+  userId?: string;
   name: string;
   capabilities: string[];
   status: RescueTeamStatus;
@@ -11,6 +12,7 @@ export interface IRescueTeam extends Document {
 
 const rescueTeamSchema = new Schema<IRescueTeam>(
   {
+    userId: { type: String, index: true, sparse: true },
     name: { type: String, required: true, trim: true },
     capabilities: { type: [String], required: true, validate: (items: string[]) => items.length > 0 },
     status: {

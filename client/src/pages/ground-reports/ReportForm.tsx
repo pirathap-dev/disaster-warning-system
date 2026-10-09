@@ -131,7 +131,6 @@ export default function ReportForm({ onSuccess, onCancel }: ReportFormProps) {
     setLoading(true);
     try {
       const payload: Partial<IGroundReport> = {
-        reporterId: 'citizen_123', // Will be replaced by real auth
         disasterType: disasterType as DisasterType,
         severity: severity as SeverityLevel,
         description,

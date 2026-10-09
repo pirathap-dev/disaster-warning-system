@@ -67,6 +67,9 @@ export const listReliefAllocations = asyncHandler(
       shelterId: shelterId as string | undefined,
       resourceId: resourceId as string | undefined,
       status: status as ReliefAllocationStatus | undefined,
+      ...(req.user?.role === 'SHELTER_COORDINATOR'
+        ? { shelterCoordinatorUserId: req.user.id }
+        : {}),
     });
     res.status(200).json({ success: true, data });
   }
@@ -104,7 +107,10 @@ export const readAllocation = asyncHandler(
     validateId(req.params.id);
     res.status(200).json({
       success: true,
-      data: await getReliefAllocationById(req.params.id),
+      data: await getReliefAllocationById(
+        req.params.id,
+        req.user?.role === 'SHELTER_COORDINATOR' ? req.user.id : undefined
+      ),
     });
   }
 );
@@ -124,7 +130,8 @@ export const updateAllocationStatus = asyncHandler(
       success: true,
       data: await updateReliefAllocationStatus(
         req.params.id,
-        status as ReliefAllocationStatus
+        status as ReliefAllocationStatus,
+        req.user?.role === 'SHELTER_COORDINATOR' ? req.user.id : undefined
       ),
     });
   }
@@ -140,7 +147,8 @@ export const confirmAllocationReceipt = asyncHandler(
       data: await confirmReliefReceipt(
         req.params.id,
         positiveInteger(body.receivedQuantity, 'Received quantity'),
-        notes
+        notes,
+        req.user!.id
       ),
     });
   }

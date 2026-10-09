@@ -9,6 +9,7 @@ import sheltersRoutes from './routes/shelters';
 import reliefResourcesRoutes from './routes/reliefResources';
 import reliefAllocationsRoutes from './routes/reliefAllocations';
 import warningRoutes from './routes/warnings';
+import authRoutes from './routes/auth';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
@@ -22,6 +23,7 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // Module 1: Ground Reports
 app.use('/api/reports', reportRoutes);

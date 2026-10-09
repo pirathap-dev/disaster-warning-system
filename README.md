@@ -79,11 +79,13 @@ Create `.env` files in both the `client` and `server` directories based on the p
 PORT=5000
 NODE_ENV=development
 MONGO_URI=mongodb://localhost:27017/disaster_management_dev
+ENABLE_TEST_ACCESS=true
 ```
 
 **`client/.env`:**
 ```env
 VITE_API_URL=http://localhost:5000/api
+VITE_ENABLE_TEST_ACCESS=true
 ```
 
 The shelter and relief module can also use the defaults above if these files are
@@ -99,8 +101,43 @@ To load idempotent demonstration shelters and inventory records for the Shelter
 ```bash
 npm --prefix server run seed
 ```
-The seed command only inserts the demonstration records when they do not already
-exist; it does not reset an existing inventory count.
+The general shelter and inventory seed records are inserted when missing. When
+`ENABLE_TEST_ACCESS=true` in `development` or `demo` mode, the same command also
+creates/refreshes the test-only accounts and linked sample workflow records.
+
+## Demo Test Access
+
+With both test-access flags enabled and the server running in `development` or
+`demo` mode, open `http://localhost:5173/test-access`. Choose a role to create a
+normal signed-in session, or use the floating **TEST MODE** role selector to
+switch accounts. Test accounts have no usable password; the existing real login
+and its credential checks are unchanged.
+
+Test usernames:
+- Citizen: `citizen.test@dwecs.local`
+- Volunteer: `volunteer.test@dwecs.local`
+- DMC Duty Officer: `dmcofficer.test@dwecs.local`
+- District Officer: `districtofficer.test@dwecs.local`
+- Rescue Team: `rescueteam.test@dwecs.local`
+- Shelter Coordinator: `sheltercoordinator.test@dwecs.local`
+- Resource Organization: `resourceorg.test@dwecs.local`
+
+The seed links the rescue account to its team and the shelter coordinator
+account to its shelter. Test identities use an unusable password hash, and the
+normal backend role/ownership checks still apply.
+
+To turn test access off, set `ENABLE_TEST_ACCESS=false` or remove it from
+`server/.env`, and set `VITE_ENABLE_TEST_ACCESS=false` or remove it from
+`client/.env`; restart/rebuild the respective processes. The test-login endpoint
+returns `404` unless the server flag is `true` and `NODE_ENV` is exactly
+`development` or `demo`. Demo tokens are rejected after the flag is turned off.
+Production-mode frontend builds do not expose the page even if the Vite flag is
+accidentally set.
+
+Before final release, keep both flags off and remove the `TestAccess` page and
+route, `TestModeBar`, `/api/auth/test-login`, `AuthService.testLogin`, the
+test-access config/claim handling, and the `seedTestAccessData` fixture block
+and tests. Keep the ordinary login, registration, and authorization code.
 
 ## 7. Running the Application
 
@@ -120,9 +157,9 @@ npm run dev
 - **Allocation lifecycle:** `REQUESTED → ALLOCATED → DISPATCHED → RECEIVED → COMPLETED`; a `REQUESTED` allocation may instead be cancelled. Receipt confirmation records the delivered amount and performs the `DISPATCHED → RECEIVED` transition.
 - **Coordinator workspace:** use the Shelter Coordinator tab on the Shelter & Relief screen to view deliveries and confirm receipts
 
-The project currently defines user roles but does not yet implement authentication
-or route-level authorization. The officer and coordinator tabs are therefore
-workflow views, not access-control boundaries.
+The application uses a shared login session and role-aware routes. Backend
+authorization remains authoritative; the demo test-access feature does not
+grant privileges beyond the selected seeded account's role.
 
 ## 8. Running Tests
 

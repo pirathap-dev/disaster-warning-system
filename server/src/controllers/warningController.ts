@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { WarningService } from '../services/warningService';
+import { WarningStatus } from '../types';
 
 export class WarningController {
   /**
@@ -22,9 +23,10 @@ export class WarningController {
    */
   static async createWarning(req: Request, res: Response, next: NextFunction) {
     try {
-      const userRole = (req.headers['x-user-role'] as string) || (req.body.userRole as string);
+      const userRole = req.user?.role;
       const warning = await WarningService.createWarning({
         ...req.body,
+        createdBy: req.user?.name,
         userRole,
       });
       res.status(201).json({
@@ -42,11 +44,17 @@ export class WarningController {
   static async getWarnings(req: Request, res: Response, next: NextFunction) {
     try {
       const { status, warningLevel, hazardId } = req.query;
-      const warnings = await WarningService.getWarnings({
+      let warnings = await WarningService.getWarnings({
         status: status as string,
         warningLevel: warningLevel as string,
         hazardId: hazardId as string,
       });
+      if (req.user?.role === 'CITIZEN' || req.user?.role === 'VOLUNTEER') {
+        warnings = warnings.filter((warning) =>
+          [WarningStatus.PUBLISHED, WarningStatus.ACTIVE, WarningStatus.UPDATED].includes(warning.status) &&
+          (!req.user?.district || warning.affectedArea.toLowerCase().includes(req.user.district.toLowerCase()))
+        );
+      }
       res.status(200).json({
         success: true,
         data: warnings,
@@ -78,7 +86,7 @@ export class WarningController {
   static async updateWarning(req: Request, res: Response, next: NextFunction) {
     try {
       const { id } = req.params;
-      const userRole = (req.headers['x-user-role'] as string) || (req.body.userRole as string);
+      const userRole = req.user?.role;
       const updated = await WarningService.updateWarning(id, req.body, userRole);
       res.status(200).json({
         success: true,
@@ -96,7 +104,7 @@ export class WarningController {
     try {
       const { id } = req.params;
       const { status, cancellationReason } = req.body;
-      const userRole = (req.headers['x-user-role'] as string) || (req.body.userRole as string);
+      const userRole = req.user?.role;
       const updated = await WarningService.updateStatus(id, status, {
         cancellationReason,
         userRole,
