@@ -55,7 +55,7 @@ describe('ReportForm', () => {
     fireEvent.change(selects[0], { target: { value: DisasterType.FLOOD } });
     fireEvent.change(selects[1], { target: { value: SeverityLevel.HIGH } });
     
-    const inputs = document.querySelectorAll('input');
+    const inputs = document.querySelectorAll('input[type="number"]');
     fireEvent.change(inputs[0], { target: { value: '10' } });
     fireEvent.change(inputs[1], { target: { value: '20' } });
     
@@ -87,7 +87,7 @@ describe('ReportForm', () => {
     fireEvent.change(selects[0], { target: { value: DisasterType.FIRE } });
     fireEvent.change(selects[1], { target: { value: SeverityLevel.CRITICAL } });
     
-    const inputs = document.querySelectorAll('input');
+    const inputs = document.querySelectorAll('input[type="number"]');
     fireEvent.change(inputs[0], { target: { value: '10' } });
     fireEvent.change(inputs[1], { target: { value: '20' } });
     
