@@ -1,30 +1,3 @@
-export enum UserRole {
-  CITIZEN = 'CITIZEN',
-  DMC_OFFICER = 'DMC_OFFICER',
-  DISTRICT_OFFICER = 'DISTRICT_OFFICER',
-  SHELTER_COORDINATOR = 'SHELTER_COORDINATOR',
-}
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  phone?: string;
-  district?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: {
-    message: string;
-    code: string;
-  };
-}
-
 export enum ReportStatus {
   SUBMITTED = 'SUBMITTED',
   UNDER_REVIEW = 'UNDER_REVIEW',
@@ -56,8 +29,8 @@ export interface Location {
 }
 
 export interface IGroundReport {
-  _id?: string;
-  reporterId: string; // Citizen
+  _id: string;
+  reporterId: string;
   disasterType: DisasterType;
   description: string;
   severity: SeverityLevel;
@@ -66,18 +39,19 @@ export interface IGroundReport {
   status: ReportStatus;
   isDuplicate?: boolean;
   duplicateOf?: string;
-  reviewerId?: string; // DMC Officer
+  reviewerId?: string;
   verificationRemarks?: string;
-  verificationTimestamp?: Date;
-  createdAt: Date;
-  updatedAt: Date;
+  verificationTimestamp?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
-export enum WarningLevel {
-  LOW = 'LOW',
-  MODERATE = 'MODERATE',
-  HIGH = 'HIGH',
-  CRITICAL = 'CRITICAL',
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: {
+    message: string;
+    code: string;
+    details?: unknown[];
+  };
 }
-
-// ... more types to be added by other devs
