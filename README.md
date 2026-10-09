@@ -66,8 +66,8 @@ The four main modules are:
 From the root directory, run:
 ```bash
 npm install
-cd client && npm install
-cd ../server && npm install
+npm install --prefix client
+npm install --prefix server
 ```
 
 ## 5. Environment Variables
@@ -86,9 +86,21 @@ MONGO_URI=mongodb://localhost:27017/disaster_management_dev
 VITE_API_URL=http://localhost:5000/api
 ```
 
+The shelter and relief module can also use the defaults above if these files are
+not created. `createdBy` is entered on the allocation form because this project
+does not yet have authentication middleware or a signed-in user context.
+
 ## 6. Database Setup
 
-Ensure MongoDB is running locally. The server is configured to connect to `mongodb://localhost:27017/disaster_management_dev` by default. Seed data scripts will be added later for easy onboarding.
+Ensure MongoDB is running locally. The server is configured to connect to `mongodb://localhost:27017/disaster_management_dev` by default.
+
+To load idempotent demonstration shelters and inventory records for the Shelter
+& Relief screen, run this from the project root after MongoDB is running:
+```bash
+npm --prefix server run seed
+```
+The seed command only inserts the demonstration records when they do not already
+exist; it does not reset an existing inventory count.
 
 ## 7. Running the Application
 
@@ -99,6 +111,18 @@ npm run dev
 
 - **Frontend** runs on `http://localhost:5173`
 - **Backend** runs on `http://localhost:5000`
+- **Shelter API:**
+  - `GET /api/shelters` and `GET /api/shelters/:id` return capacity, occupancy percentage, available capacity, and derived capacity status.
+  - `GET /api/relief-resources` returns current resource stock.
+  - `POST /api/relief-allocations` accepts `shelterId`, `resourceId`, `requestedQuantity`, `createdBy`, and optional `notes`. A successful allocation starts as `ALLOCATED` and atomically reserves inventory.
+  - `GET /api/relief-allocations` supports optional `shelterId`, `resourceId`, and `status` filters; `GET /api/relief-allocations/:id` returns allocation details.
+  - `PATCH /api/relief-allocations/:id/status` advances valid non-receipt transitions; `PATCH /api/relief-allocations/:id/receipt` confirms the delivered quantity.
+- **Allocation lifecycle:** `REQUESTED → ALLOCATED → DISPATCHED → RECEIVED → COMPLETED`; a `REQUESTED` allocation may instead be cancelled. Receipt confirmation records the delivered amount and performs the `DISPATCHED → RECEIVED` transition.
+- **Coordinator workspace:** use the Shelter Coordinator tab on the Shelter & Relief screen to view deliveries and confirm receipts
+
+The project currently defines user roles but does not yet implement authentication
+or route-level authorization. The officer and coordinator tabs are therefore
+workflow views, not access-control boundaries.
 
 ## 8. Running Tests
 

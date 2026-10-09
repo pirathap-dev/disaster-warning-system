@@ -4,8 +4,11 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import healthRoutes from './routes/health';
 import reportRoutes from './routes/reports';
-import { errorHandler, notFoundHandler } from './middleware/error';
 import rescueRoutes from './routes/rescue';
+import sheltersRoutes from './routes/shelters';
+import reliefResourcesRoutes from './routes/reliefResources';
+import reliefAllocationsRoutes from './routes/reliefAllocations';
+import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
 
@@ -18,13 +21,20 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/health', healthRoutes);
+
+// Module 1: Ground Reports
+app.use('/api/reports', reportRoutes);
+
+// Module 3: Rescue Coordination
 app.use('/api/rescue', rescueRoutes);
 
-// Add future routes here
-// app.use('/api/users', userRoutes);
-app.use('/api/reports', reportRoutes);
+// Module 4: Shelter & Relief
+app.use('/api/shelters', sheltersRoutes);
+app.use('/api/relief-resources', reliefResourcesRoutes);
+app.use('/api/relief-allocations', reliefAllocationsRoutes);
+
+// Module 2: Hazard & Warnings (to be added)
 // app.use('/api/warnings', warningRoutes);
-// app.use('/api/shelters', shelterRoutes);
 
 // Error Handling
 app.use(notFoundHandler);
