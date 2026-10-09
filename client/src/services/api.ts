@@ -12,19 +12,39 @@ export const GroundReportApi = {
     return response.json();
   },
 
-  async getAll(role?: 'citizen' | 'dmc', reporterId?: string): Promise<ApiResponse<IGroundReport[]>> {
-    let url = `${API_URL}/reports`;
-    if (role === 'citizen' && reporterId) {
-      url += `?reporterId=${reporterId}`;
-    }
+  async getAll(reporterId?: string): Promise<ApiResponse<IGroundReport[]>> {
+    const url = reporterId
+      ? `${API_URL}/reports?reporterId=${encodeURIComponent(reporterId)}`
+      : `${API_URL}/reports`;
     const response = await fetch(url);
     return response.json();
   },
 
+  async edit(
+    id: string,
+    reporterId: string,
+    updates: Partial<IGroundReport>
+  ): Promise<ApiResponse<IGroundReport>> {
+    const response = await fetch(`${API_URL}/reports/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reporterId, ...updates })
+    });
+    return response.json();
+  },
+
+  async delete(id: string, reporterId: string): Promise<ApiResponse<null>> {
+    const response = await fetch(
+      `${API_URL}/reports/${id}?reporterId=${encodeURIComponent(reporterId)}`,
+      { method: 'DELETE' }
+    );
+    return response.json();
+  },
+
   async updateStatus(
-    id: string, 
-    status: ReportStatus, 
-    reviewerId: string, 
+    id: string,
+    status: ReportStatus,
+    reviewerId: string,
     remarks?: string
   ): Promise<ApiResponse<IGroundReport>> {
     const response = await fetch(`${API_URL}/reports/${id}/status`, {
