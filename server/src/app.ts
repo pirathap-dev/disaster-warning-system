@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import healthRoutes from './routes/health';
+import warningRoutes from './routes/warnings';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
@@ -16,11 +17,7 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/health', healthRoutes);
-
-// Add future routes here
-// app.use('/api/users', userRoutes);
-// app.use('/api/reports', reportRoutes);
-// app.use('/api/warnings', warningRoutes);
+app.use('/api/warnings', warningRoutes);
 // app.use('/api/rescue', rescueRoutes);
 // app.use('/api/shelters', shelterRoutes);
 

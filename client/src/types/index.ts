@@ -81,9 +81,9 @@ export interface IHazard {
   description: string;
   status: ReportStatus;
   verifiedBy?: string;
-  verifiedAt?: Date;
-  createdAt?: Date;
-  updatedAt?: Date;
+  verifiedAt?: Date | string;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 export interface IWarningDeliverySummary {
@@ -109,18 +109,18 @@ export interface IWarning {
   priority: WarningPriority;
   message: string;
   affectedArea: string;
-  startTime: Date;
-  expiryTime: Date;
+  startTime: string | Date;
+  expiryTime: string | Date;
   recommendedAction: string;
   createdBy: string;
   status: WarningStatus;
-  publishedTimestamp?: Date;
-  updatedTimestamp?: Date;
-  cancelledTimestamp?: Date;
+  publishedTimestamp?: string | Date;
+  updatedTimestamp?: string | Date;
+  cancelledTimestamp?: string | Date;
   cancellationReason?: string;
   deliverySummary?: IWarningDeliverySummary;
-  createdAt?: Date;
-  updatedAt?: Date;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
 
 export interface INotificationRecord {
@@ -131,9 +131,9 @@ export interface INotificationRecord {
   recipientIdentifier: string;
   targetArea: string;
   status: NotificationDeliveryStatus;
-  sentAt?: Date;
-  deliveredAt?: Date;
+  sentAt?: string | Date;
+  deliveredAt?: string | Date;
   failureReason?: string;
-  createdAt?: Date;
-  updatedAt?: Date;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
 }
