@@ -9,8 +9,8 @@ export const validateRequest = (req: Request, res: Response, next: NextFunction)
       error: {
         message: 'Validation failed',
         code: 'VALIDATION_ERROR',
-        details: errors.array()
-      }
+        details: errors.array(),
+      },
     });
     return;
   }

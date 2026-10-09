@@ -8,6 +8,7 @@ import rescueRoutes from './routes/rescue';
 import sheltersRoutes from './routes/shelters';
 import reliefResourcesRoutes from './routes/reliefResources';
 import reliefAllocationsRoutes from './routes/reliefAllocations';
+import warningRoutes from './routes/warnings';
 import { errorHandler, notFoundHandler } from './middleware/error';
 
 const app = express();
@@ -25,6 +26,9 @@ app.use('/api/health', healthRoutes);
 // Module 1: Ground Reports
 app.use('/api/reports', reportRoutes);
 
+// Module 2: Hazard & Warnings
+app.use('/api/warnings', warningRoutes);
+
 // Module 3: Rescue Coordination
 app.use('/api/rescue', rescueRoutes);
 
@@ -32,9 +36,6 @@ app.use('/api/rescue', rescueRoutes);
 app.use('/api/shelters', sheltersRoutes);
 app.use('/api/relief-resources', reliefResourcesRoutes);
 app.use('/api/relief-allocations', reliefAllocationsRoutes);
-
-// Module 2: Hazard & Warnings (to be added)
-// app.use('/api/warnings', warningRoutes);
 
 // Error Handling
 app.use(notFoundHandler);
