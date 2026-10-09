@@ -26,21 +26,57 @@ export default function ReportForm({ onSuccess, onCancel }: ReportFormProps) {
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
 
+  const [gpsLoading, setGpsLoading] = useState(false);
+
   const handleGetLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocation({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude
-          });
-          toast('Location captured successfully', 'success');
-        },
-        (error) => toast('Failed to get location: ' + error.message, 'error')
+    // Geolocation requires a secure context (HTTPS) or localhost
+    if (!window.isSecureContext && !window.location.hostname.includes('localhost')) {
+      toast(
+        'Geolocation requires HTTPS. Please enter coordinates manually or access the app via localhost.',
+        'error'
       );
-    } else {
-      toast('Geolocation is not supported by this browser.', 'error');
+      return;
     }
+    if (!navigator.geolocation) {
+      toast('Your browser does not support geolocation. Please enter coordinates manually.', 'error');
+      return;
+    }
+
+    setGpsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude
+        });
+        setGpsLoading(false);
+        toast(`Location captured: ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`, 'success');
+      },
+      (error) => {
+        setGpsLoading(false);
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            toast(
+              'Location access denied. Please allow location in your browser settings, then try again.',
+              'error'
+            );
+            break;
+          case error.POSITION_UNAVAILABLE:
+            toast('Location unavailable. Enter coordinates manually.', 'error');
+            break;
+          case error.TIMEOUT:
+            toast('Location request timed out. Check your GPS signal and try again.', 'error');
+            break;
+          default:
+            toast('Could not get location: ' + error.message, 'error');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,       // 10 second timeout
+        maximumAge: 30000,    // Accept cached position up to 30s old
+      }
+    );
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -223,8 +259,13 @@ export default function ReportForm({ onSuccess, onCancel }: ReportFormProps) {
       <div className="space-y-2 p-4 bg-gray-50 rounded-lg border border-gray-200">
         <div className="flex justify-between items-center">
           <label className="block text-sm font-medium text-gray-700">Location (GPS) *</label>
-          <Button type="button" variant="outline" size="sm" onClick={handleGetLocation}>
-            📍 Get Current Location
+          <Button type="button" variant="outline" size="sm" onClick={handleGetLocation} disabled={gpsLoading}>
+            {gpsLoading ? (
+              <span className="flex items-center gap-1.5">
+                <span className="animate-spin inline-block w-3 h-3 border-2 border-brand-600 border-t-transparent rounded-full" />
+                Acquiring GPS...
+              </span>
+            ) : '📍 Get Current Location'}
           </Button>
         </div>
 
