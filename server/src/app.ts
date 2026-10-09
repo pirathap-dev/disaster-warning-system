@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import healthRoutes from './routes/health';
 import reportRoutes from './routes/reports';
 import { errorHandler, notFoundHandler } from './middleware/error';
+import rescueRoutes from './routes/rescue';
 
 const app = express();
 
@@ -17,12 +18,12 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/health', healthRoutes);
+app.use('/api/rescue', rescueRoutes);
 
 // Add future routes here
 // app.use('/api/users', userRoutes);
 app.use('/api/reports', reportRoutes);
 // app.use('/api/warnings', warningRoutes);
-// app.use('/api/rescue', rescueRoutes);
 // app.use('/api/shelters', shelterRoutes);
 
 // Error Handling
