@@ -121,9 +121,21 @@ export default function DMCOfficerView() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="font-medium text-gray-500">Reporter ID:</span> {selectedReport.reporterId}</div>
               <div><span className="font-medium text-gray-500">Submitted:</span> {new Date(selectedReport.createdAt).toLocaleString()}</div>
-              <div><span className="font-medium text-gray-500">Severity:</span> {selectedReport.severity}</div>
+              <div><span className="font-medium text-gray-500">Severity:</span> <span className={`font-semibold ${selectedReport.severity === 'CRITICAL' ? 'text-red-600' : selectedReport.severity === 'HIGH' ? 'text-orange-600' : 'text-gray-700'}`}>{selectedReport.severity}</span></div>
               <div><span className="font-medium text-gray-500">Location:</span> {selectedReport.location.latitude.toFixed(4)}, {selectedReport.location.longitude.toFixed(4)}</div>
             </div>
+
+            {/* Photo Evidence */}
+            {selectedReport.imageUrl && (
+              <div>
+                <span className="font-medium text-gray-500 text-sm block mb-1">Photo Evidence:</span>
+                <img
+                  src={selectedReport.imageUrl}
+                  alt="Disaster evidence"
+                  className="w-full max-h-64 object-cover rounded-lg border border-gray-200 shadow-sm"
+                />
+              </div>
+            )}
 
             <div>
               <span className="font-medium text-gray-500 text-sm block mb-1">Description:</span>
