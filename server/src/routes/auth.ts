@@ -12,7 +12,14 @@ router.post('/register', [
   body('name').isString().trim().notEmpty(),
   body('email').isEmail().normalizeEmail(),
   body('password').isString().isLength({ min: 8 }),
-  body('role').optional().isIn([UserRole.CITIZEN, UserRole.VOLUNTEER]),
+  body('role').optional().isIn([
+    UserRole.CITIZEN,
+    UserRole.VOLUNTEER,
+    UserRole.DMC_OFFICER,
+    UserRole.SHELTER_COORDINATOR,
+    UserRole.RESCUE_TEAM,
+    UserRole.DISTRICT_OFFICER,
+  ]),
 ], validateRequest, register);
 
 router.post('/login', [

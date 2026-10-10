@@ -1,9 +1,12 @@
 import { FormEvent, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { ShieldAlert } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { homeForRole } from '../auth/RequireRole';
 import { UserRole } from '../types';
+
+const testAccessEnabled = import.meta.env.VITE_ENABLE_TEST_ACCESS === 'true' &&
+  (import.meta.env.MODE === 'development' || import.meta.env.MODE === 'demo');
 
 export default function Login() {
   const { session, login, register } = useAuth();
@@ -49,15 +52,27 @@ export default function Login() {
         <form className="space-y-4" onSubmit={submit}>
           {creating && <>
             <label className="block text-sm font-medium text-slate-700">Name<input required value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2" /></label>
-            <label className="block text-sm font-medium text-slate-700">Account type<select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2"><option value={UserRole.CITIZEN}>Citizen</option><option value={UserRole.VOLUNTEER}>Volunteer</option></select></label>
+            <label className="block text-sm font-medium text-slate-700">Account type<select value={role} onChange={(event) => setRole(event.target.value as UserRole)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2">
+              <option value={UserRole.CITIZEN}>Citizen</option>
+              <option value={UserRole.VOLUNTEER}>Volunteer</option>
+              <option value={UserRole.DMC_OFFICER}>DMC Officer</option>
+              <option value={UserRole.SHELTER_COORDINATOR}>Shelter Coordinator</option>
+              <option value={UserRole.RESCUE_TEAM}>Rescue Team</option>
+              <option value={UserRole.DISTRICT_OFFICER}>District Officer</option>
+            </select></label>
             <label className="block text-sm font-medium text-slate-700">District<input value={district} onChange={(event) => setDistrict(event.target.value)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2" /></label>
           </>}
           <label className="block text-sm font-medium text-slate-700">Email<input required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2" /></label>
           <label className="block text-sm font-medium text-slate-700">Password<input required type="password" minLength={creating ? 8 : undefined} autoComplete={creating ? 'new-password' : 'current-password'} value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 w-full border border-slate-300 rounded-md px-3 py-2" /></label>
           {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-          <button disabled={busy} className="w-full bg-brand-700 hover:bg-brand-800 disabled:opacity-60 text-white font-medium rounded-md px-4 py-2.5">{busy ? 'Please wait…' : creating ? 'Create account' : 'Sign in'}</button>
+          <button type="submit" disabled={busy} className="w-full bg-brand-600 hover:bg-brand-900 disabled:opacity-60 text-white font-medium rounded-md px-4 py-2.5">{busy ? 'Please wait…' : creating ? 'Create account' : 'Sign in'}</button>
         </form>
-        <button onClick={() => { setCreating((value) => !value); setError(''); }} className="mt-5 text-sm text-brand-700 hover:underline">{creating ? 'Already have an account? Sign in' : 'Register as a citizen or volunteer'}</button>
+        <button type="button" onClick={() => { setCreating((value) => !value); setError(''); }} className="mt-5 text-sm text-brand-600 hover:underline">{creating ? 'Already have an account? Sign in' : 'Register as a citizen or volunteer'}</button>
+        {!creating && testAccessEnabled && (
+          <Link to="/test-access" className="mt-5 block w-full rounded-md border border-brand-600 px-4 py-2.5 text-center font-medium text-brand-600 hover:bg-brand-50">
+            Demo sign-in: DMC Officer, Shelter Coordinator, Rescue Team, District Officer
+          </Link>
+        )}
       </section>
     </main>
   );

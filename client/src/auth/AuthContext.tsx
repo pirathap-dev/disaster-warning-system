@@ -4,6 +4,22 @@ import { ApiResponse, User, UserRole } from '../types';
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const SESSION_KEY = 'dwecs-session';
 
+function getRequestErrorMessage(error: ApiResponse['error'], status: number) {
+  const fallback = `Request failed (${status})`;
+  if (!error) return fallback;
+
+  if (error.code === 'VALIDATION_ERROR' && Array.isArray(error.details)) {
+    const validationMessages = error.details.flatMap((detail) => {
+      if (typeof detail !== 'object' || detail === null || !('msg' in detail)) return [];
+      const field = 'path' in detail && typeof detail.path === 'string' ? `${detail.path}: ` : '';
+      return [`${field}${String(detail.msg)}`];
+    });
+    if (validationMessages.length) return validationMessages.join(' ');
+  }
+
+  return error.message || fallback;
+}
+
 interface AuthSession {
   token: string;
   user: User;
@@ -44,7 +60,7 @@ async function authRequest(path: string, body?: unknown, token?: string) {
   });
   const result = await response.json() as ApiResponse<AuthSession | User>;
   if (!response.ok || !result.success || !result.data) {
-    throw new Error(result.error?.message || `Request failed (${response.status})`);
+    throw new Error(getRequestErrorMessage(result.error, response.status));
   }
   return result.data;
 }

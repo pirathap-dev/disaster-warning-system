@@ -73,8 +73,20 @@ export class AuthService {
       throw new AuthServiceError('Name, email, and a password of at least 8 characters are required.', 400, 'INVALID_REGISTRATION');
     }
     const role = data.role || UserRole.CITIZEN;
-    if (![UserRole.CITIZEN, UserRole.VOLUNTEER].includes(role)) {
-      throw new AuthServiceError('Public registration is limited to CITIZEN and VOLUNTEER accounts.', 403, 'ROLE_ASSIGNMENT_FORBIDDEN');
+    const allowedRoles = [
+      UserRole.CITIZEN,
+      UserRole.VOLUNTEER,
+      UserRole.DMC_OFFICER,
+      UserRole.SHELTER_COORDINATOR,
+      UserRole.RESCUE_TEAM,
+      UserRole.DISTRICT_OFFICER,
+    ];
+    if (!allowedRoles.includes(role)) {
+      throw new AuthServiceError(
+        'This role is not available for public registration.',
+        403,
+        'ROLE_ASSIGNMENT_FORBIDDEN'
+      );
     }
     const email = data.email.trim().toLowerCase();
     if (await UserModel.exists({ email })) {
