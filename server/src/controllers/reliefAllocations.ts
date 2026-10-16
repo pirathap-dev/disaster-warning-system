@@ -4,6 +4,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import {
   confirmReliefReceipt,
   createReliefAllocation,
+  createReliefAllocations,
   getReliefAllocationById,
   getReliefAllocations,
   updateReliefAllocationStatus,
@@ -79,15 +80,39 @@ export const createAllocation = asyncHandler(
   async (req: Request, res: Response) => {
     const body = requestBody(req.body);
     const shelterId = requiredString(body.shelterId, 'Shelter');
-    const resourceId = requiredString(body.resourceId, 'Resource');
-    if (!isValidObjectId(shelterId) || !isValidObjectId(resourceId)) {
-      throw new ServiceError('Invalid shelter or resource ID', 400, 'INVALID_ID');
-    }
     const createdBy = requiredString(body.createdBy, 'Created by');
     if (createdBy.length > 120) {
       throw new ServiceError('Created by must be 120 characters or fewer', 400, 'VALIDATION_ERROR');
     }
     const notes = optionalNotes(body.notes);
+    if (!isValidObjectId(shelterId)) {
+      throw new ServiceError('Invalid shelter ID', 400, 'INVALID_ID');
+    }
+
+    if (Array.isArray(body.allocations)) {
+      if (body.allocations.length === 0 || body.allocations.length > 20) {
+        throw new ServiceError('Select between 1 and 20 relief resources', 400, 'VALIDATION_ERROR');
+      }
+      const allocations = body.allocations.map((value) => {
+        const item = requestBody(value);
+        const resourceId = requiredString(item.resourceId, 'Resource');
+        if (!isValidObjectId(resourceId)) {
+          throw new ServiceError('Invalid resource ID', 400, 'INVALID_ID');
+        }
+        return {
+          resourceId,
+          requestedQuantity: positiveInteger(item.requestedQuantity, 'Requested quantity'),
+        };
+      });
+      const data = await createReliefAllocations({ shelterId, allocations, createdBy, notes });
+      res.status(201).json({ success: true, data });
+      return;
+    }
+
+    const resourceId = requiredString(body.resourceId, 'Resource');
+    if (!isValidObjectId(resourceId)) {
+      throw new ServiceError('Invalid resource ID', 400, 'INVALID_ID');
+    }
 
     res.status(201).json({
       success: true,

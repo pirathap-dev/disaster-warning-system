@@ -12,6 +12,11 @@ export type ReliefAllocationStatus =
 
 export interface Shelter {
   _id: string;
+  coordinatorUserId?: string;
+  coordinatorRequestUserId?: string;
+  coordinatorRequestByUserId?: string;
+  coordinatorRequestStatus?: 'PENDING' | 'ACCEPTED' | 'DECLINED';
+  coordinatorRequestMessage?: string;
   name: string;
   location: string;
   capacity: number;
@@ -76,6 +81,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const reliefApi = {
   getShelters: () => request<Shelter[]>('/shelters'),
+  createShelter: (shelter: {
+    name: string;
+    location: string;
+    capacity: number;
+  }) =>
+    request<Shelter>('/shelters', {
+      method: 'POST',
+      body: JSON.stringify(shelter),
+    }),
+  requestCoordinator: (id: string, message?: string) =>
+    request<Shelter>(`/shelters/${id}/coordinator-request`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  getCoordinatorRequests: () => request<Shelter[]>('/shelters/coordinator-requests'),
+  respondToCoordinatorRequest: (id: string, decision: 'ACCEPTED' | 'DECLINED') =>
+    request<Shelter>(`/shelters/${id}/coordinator-request`, {
+      method: 'PATCH',
+      body: JSON.stringify({ decision }),
+    }),
   getResources: () => request<ReliefResource[]>('/relief-resources'),
   getAllocations: () => request<ReliefAllocation[]>('/relief-allocations'),
   updateOccupancy: (id: string, currentOccupancy: number) =>
@@ -106,6 +131,16 @@ export const reliefApi = {
     notes?: string;
   }) =>
     request<ReliefAllocation>('/relief-allocations', {
+      method: 'POST',
+      body: JSON.stringify(allocation),
+    }),
+  createAllocations: (allocation: {
+    shelterId: string;
+    allocations: { resourceId: string; requestedQuantity: number }[];
+    createdBy: string;
+    notes?: string;
+  }) =>
+    request<ReliefAllocation[]>('/relief-allocations', {
       method: 'POST',
       body: JSON.stringify(allocation),
     }),

@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Home,
   PackageCheck,
+  RefreshCw,
   Truck,
 } from 'lucide-react';
 import { Badge } from '../components/ui/Badge';
@@ -110,34 +111,45 @@ export default function ShelterRelief() {
   const [loadError, setLoadError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [shelterId, setShelterId] = useState('');
-  const [resourceId, setResourceId] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [createdBy, setCreatedBy] = useState('');
+  const [allocationQuantities, setAllocationQuantities] = useState<Record<string, string>>({});
+  const [resourceSearch, setResourceSearch] = useState('');
   const [notes, setNotes] = useState('');
   const [coordinatorShelterId, setCoordinatorShelterId] = useState('');
+  const [coordinatorRequests, setCoordinatorRequests] = useState<Shelter[]>([]);
+  const [coordinatorRequestsError, setCoordinatorRequestsError] = useState('');
+  const [coordinatorRequestId, setCoordinatorRequestId] = useState('');
+  const [requestShelterId, setRequestShelterId] = useState('');
+  const [coordinatorRequestMessage, setCoordinatorRequestMessage] = useState('');
+  const [occupancyAction, setOccupancyAction] = useState<'add' | 'release'>('add');
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({});
   const [detailsAllocation, setDetailsAllocation] = useState<ReliefAllocation | null>(null);
-  const [currentOccupancy, setCurrentOccupancy] = useState('');
+  const [peopleToAdd, setPeopleToAdd] = useState('');
   const [resourceName, setResourceName] = useState('');
   const [resourceCategory, setResourceCategory] = useState('');
   const [resourceQuantity, setResourceQuantity] = useState('0');
   const [resourceUnit, setResourceUnit] = useState('');
   const [resourceSource, setResourceSource] = useState('');
+  const [newShelterName, setNewShelterName] = useState('');
+  const [newShelterLocation, setNewShelterLocation] = useState('');
+  const [newShelterCapacity, setNewShelterCapacity] = useState('');
+  const [shelterFormOpen, setShelterFormOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const [nextShelters, nextResources, nextAllocations] = await Promise.all([
+      const [nextShelters, nextResources, nextAllocations, nextCoordinatorRequests] = await Promise.all([
         workspace === 'organization' ? Promise.resolve([]) : reliefApi.getShelters(),
         workspace === 'finder' ? Promise.resolve([]) : reliefApi.getResources(),
         workspace === 'officer' || workspace === 'coordinator'
           ? reliefApi.getAllocations()
           : Promise.resolve([]),
+        workspace === 'coordinator' ? reliefApi.getCoordinatorRequests() : Promise.resolve([]),
       ]);
       setShelters(nextShelters);
       setResources(nextResources);
       setAllocations(nextAllocations);
+      setCoordinatorRequests(nextCoordinatorRequests);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not load shelter and relief data';
       setLoadError(message);
@@ -150,19 +162,58 @@ export default function ShelterRelief() {
     void loadData();
   }, [loadData]);
 
+  const refreshCoordinatorRequests = useCallback(async () => {
+    try {
+      const requests = await reliefApi.getCoordinatorRequests();
+      setCoordinatorRequests(requests);
+      setCoordinatorRequestsError('');
+    } catch (error) {
+      setCoordinatorRequestsError(
+        error instanceof Error ? error.message : 'Could not refresh shelter requests'
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (workspace !== 'coordinator') return undefined;
+    const intervalId = window.setInterval(() => {
+      void refreshCoordinatorRequests();
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [workspace, refreshCoordinatorRequests]);
+
   const selectedShelter = shelters.find((shelter) => shelter._id === shelterId);
-  const selectedResource = resources.find((resource) => resource._id === resourceId);
-  const requestedQuantity = Number(quantity);
+  const requestedShelter = shelters.find((shelter) => shelter._id === requestShelterId);
+  const selectedResources = resources.filter((resource) =>
+    Object.prototype.hasOwnProperty.call(allocationQuantities, resource._id)
+  );
+  const filteredResources = resources.filter((resource) =>
+    `${resource.name} ${resource.category}`.toLowerCase().includes(resourceSearch.trim().toLowerCase())
+  );
+  const addedPeople = Number(peopleToAdd);
+  const hasInvalidAllocationQuantities = selectedResources.some((resource) => {
+    const requestedQuantity = Number(allocationQuantities[resource._id]);
+    return !Number.isInteger(requestedQuantity) || requestedQuantity <= 0 ||
+      requestedQuantity > resource.availableQuantity;
+  });
   const matchingActiveAllocations = useMemo(
     () => allocations.filter((allocation) =>
       relatedId(allocation.shelter) === shelterId &&
-      relatedId(allocation.resource) === resourceId &&
+      Object.prototype.hasOwnProperty.call(allocationQuantities, relatedId(allocation.resource)) &&
       activeStatuses.includes(allocation.status)
     ),
-    [allocations, shelterId, resourceId]
+    [allocations, shelterId, allocationQuantities]
   );
   const coordinatorShelter = coordinatorShelterId || shelters[0]?._id || '';
   const selectedCoordinatorShelter = shelters.find((shelter) => shelter._id === coordinatorShelter);
+  const selectedCoordinatorRequest = coordinatorRequests.find(
+    (shelter) => shelter._id === coordinatorRequestId
+  );
+  const occupancyChange = occupancyAction === 'add' ? addedPeople : -addedPeople;
+  const resultingOccupancy = (selectedCoordinatorShelter?.currentOccupancy ?? 0) + occupancyChange;
+  const availableForOccupancyAction = occupancyAction === 'add'
+    ? selectedCoordinatorShelter?.availableCapacity ?? 0
+    : selectedCoordinatorShelter?.currentOccupancy ?? 0;
   const incomingAllocations = allocations.filter((allocation) =>
     relatedId(allocation.shelter) === coordinatorShelter &&
     (allocation.status === 'ALLOCATED' || allocation.status === 'DISPATCHED')
@@ -170,30 +221,28 @@ export default function ShelterRelief() {
 
   async function submitAllocation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedShelter || !selectedResource || !Number.isInteger(requestedQuantity) || requestedQuantity <= 0) {
-      toast('Select a shelter and resource, and enter a positive whole-number quantity.', 'error');
+    if (!selectedShelter || selectedResources.length === 0 || hasInvalidAllocationQuantities) {
+      toast('Select a shelter and at least one resource, then enter a valid quantity for each.', 'error');
       return;
     }
-    if (requestedQuantity > selectedResource.availableQuantity) {
-      toast(`Only ${selectedResource.availableQuantity} ${selectedResource.unit} are available.`, 'error');
-      return;
-    }
-    if (!createdBy.trim()) {
-      toast('Enter the officer name for the allocation record.', 'error');
+    if (!session?.user.name.trim()) {
+      toast('Your signed-in officer account does not have a name.', 'error');
       return;
     }
 
     setSubmitting(true);
     try {
-      await reliefApi.createAllocation({
+      await reliefApi.createAllocations({
         shelterId,
-        resourceId,
-        requestedQuantity,
-        createdBy: createdBy.trim(),
+        allocations: selectedResources.map((resource) => ({
+          resourceId: resource._id,
+          requestedQuantity: Number(allocationQuantities[resource._id]),
+        })),
+        createdBy: session.user.name,
         notes: notes.trim() || undefined,
       });
-      toast('Allocation created and inventory reserved.', 'success');
-      setQuantity('');
+      toast(`Created ${selectedResources.length} resource allocation${selectedResources.length === 1 ? '' : 's'} and reserved inventory.`, 'success');
+      setAllocationQuantities({});
       setNotes('');
       await loadData();
     } catch (error) {
@@ -240,18 +289,117 @@ export default function ShelterRelief() {
 
   async function saveOccupancy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const occupancy = Number(currentOccupancy);
-    if (!selectedCoordinatorShelter || !Number.isInteger(occupancy) || occupancy < 0 || occupancy > selectedCoordinatorShelter.capacity) {
-      toast('Enter a whole-number occupancy within this shelter capacity.', 'error');
+    if (!selectedCoordinatorShelter || !Number.isInteger(addedPeople) || addedPeople <= 0) {
+      toast(`Enter a positive whole number of people to ${occupancyAction === 'add' ? 'add' : 'release'}.`, 'error');
+      return;
+    }
+    if (addedPeople > availableForOccupancyAction) {
+      toast(
+        occupancyAction === 'add'
+          ? `Only ${selectedCoordinatorShelter.availableCapacity} spaces are available.`
+          : `Only ${selectedCoordinatorShelter.currentOccupancy} people are currently in the shelter.`,
+        'error'
+      );
       return;
     }
     setSubmitting(true);
     try {
-      await reliefApi.updateOccupancy(selectedCoordinatorShelter._id, occupancy);
-      toast('Shelter occupancy updated.', 'success');
+      const updatedShelter = await reliefApi.updateOccupancy(
+        selectedCoordinatorShelter._id,
+        resultingOccupancy
+      );
+      setShelters((current) => current.map((shelter) =>
+        shelter._id === updatedShelter._id ? updatedShelter : shelter
+      ));
+      setPeopleToAdd('');
+      toast(
+        occupancyAction === 'add'
+          ? `${addedPeople} ${addedPeople === 1 ? 'person' : 'people'} added to the shelter.`
+          : `${addedPeople} ${addedPeople === 1 ? 'person' : 'people'} released from the shelter.`,
+        'success'
+      );
+      setOccupancyAction('add');
       await loadData();
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Could not update shelter occupancy', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function createShelter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const capacity = Number(newShelterCapacity);
+    if (!newShelterName.trim() || !newShelterLocation.trim() ||
+        !Number.isInteger(capacity) || capacity <= 0) {
+      toast('Enter a shelter name, location, and positive whole-number capacity.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reliefApi.createShelter({
+        name: newShelterName.trim(),
+        location: newShelterLocation.trim(),
+        capacity,
+      });
+      setNewShelterName('');
+      setNewShelterLocation('');
+      setNewShelterCapacity('');
+      setShelterFormOpen(false);
+      toast('Shelter created.', 'success');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not create shelter', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function requestCoordinator(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!requestedShelter) {
+      toast('Select a shelter to request coordinator assignment.', 'error');
+      return;
+    }
+    if (requestedShelter.coordinatorUserId) {
+      toast('This shelter already has a coordinator.', 'error');
+      return;
+    }
+    if (requestedShelter.coordinatorRequestStatus === 'PENDING') {
+      toast('This shelter already has a pending request.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reliefApi.requestCoordinator(
+        requestedShelter._id,
+        coordinatorRequestMessage.trim() || undefined
+      );
+      setCoordinatorRequestMessage('');
+      toast(`Coordinator request sent for ${requestedShelter.name}.`, 'success');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not send coordinator request', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function respondToCoordinatorRequest(decision: 'ACCEPTED' | 'DECLINED') {
+    if (!selectedCoordinatorRequest) return;
+    setSubmitting(true);
+    try {
+      await reliefApi.respondToCoordinatorRequest(selectedCoordinatorRequest._id, decision);
+      toast(
+        decision === 'ACCEPTED'
+          ? `${selectedCoordinatorRequest.name} accepted and added to your shelters.`
+          : `Request for ${selectedCoordinatorRequest.name} declined.`,
+        'success'
+      );
+      setCoordinatorRequestId('');
+      await loadData();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not respond to shelter request', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -405,7 +553,10 @@ export default function ShelterRelief() {
           </div>
 
           <Card>
-            <CardHeader><CardTitle>Shelter capacity</CardTitle></CardHeader>
+            <CardHeader className="flex items-center justify-between gap-4">
+              <CardTitle>Shelter capacity</CardTitle>
+              <Button type="button" onClick={() => setShelterFormOpen(true)}>Add New</Button>
+            </CardHeader>
             <CardContent>
               {shelters.length === 0 ? (
                 <EmptyState title="No shelters available" description="Shelter records will appear here when they are added to the system." />
@@ -429,12 +580,125 @@ export default function ShelterRelief() {
                         />
                       </div>
                       <p className="mt-1 text-right text-xs text-gray-500">{shelter.occupancyPercentage}% occupied</p>
+                      <div className="mt-4 border-t border-gray-100 pt-3">
+                        <p className="mb-2 text-xs text-gray-500">
+                          {shelter.coordinatorUserId
+                            ? 'Coordinator assigned'
+                            : shelter.coordinatorRequestStatus === 'PENDING'
+                              ? 'Coordinator approval pending'
+                              : shelter.coordinatorRequestStatus === 'DECLINED'
+                                ? 'Coordinator request declined'
+                                : 'No coordinator assigned'}
+                        </p>
+                        {shelter.coordinatorRequestMessage && (
+                          <p className="mt-2 text-xs text-gray-500">
+                            Request note: {shelter.coordinatorRequestMessage}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Request a shelter coordinator</CardTitle>
+              <p className="mt-1 text-sm text-gray-500">
+                Choose a shelter and send a request to shelter coordinators. A coordinator can accept the request from their dashboard.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <form className="space-y-4" onSubmit={requestCoordinator}>
+                <Select
+                  label="Select shelter"
+                  aria-label="Select shelter for coordinator request"
+                  value={requestShelterId}
+                  onChange={(event) => setRequestShelterId(event.target.value)}
+                  options={shelters.map((shelter) => ({
+                    value: shelter._id,
+                    label: `${shelter.name} — ${shelter.location}${shelter.coordinatorUserId
+                      ? ' (Coordinator assigned)'
+                      : shelter.coordinatorRequestStatus === 'PENDING'
+                        ? ' (Request pending)'
+                        : ''}`,
+                  }))}
+                />
+                {requestedShelter && (
+                  <p className="text-sm text-gray-600">
+                    Capacity: {requestedShelter.capacity.toLocaleString()} · Current occupancy: {requestedShelter.currentOccupancy.toLocaleString()}
+                    {requestedShelter.coordinatorUserId
+                      ? ' · Already assigned'
+                      : requestedShelter.coordinatorRequestStatus === 'PENDING'
+                        ? ' · Request already pending'
+                        : ' · Available to request'}
+                  </p>
+                )}
+                <Input
+                  label="Message for coordinator (optional)"
+                  aria-label="Coordinator request message"
+                  placeholder="Add details about this shelter"
+                  maxLength={500}
+                  value={coordinatorRequestMessage}
+                  onChange={(event) => setCoordinatorRequestMessage(event.target.value)}
+                />
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  disabled={submitting || !requestedShelter ||
+                    Boolean(requestedShelter.coordinatorUserId) ||
+                    requestedShelter?.coordinatorRequestStatus === 'PENDING'}
+                >
+                  {submitting ? 'Sending...' : 'Send coordinator request'}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Modal
+            isOpen={shelterFormOpen}
+            onClose={() => setShelterFormOpen(false)}
+            title="Add a shelter"
+          >
+            <form className="space-y-4" onSubmit={createShelter}>
+                <Input
+                  label="Shelter name"
+                  aria-label="Shelter name"
+                  value={newShelterName}
+                  onChange={(event) => setNewShelterName(event.target.value)}
+                  maxLength={120}
+                  required
+                />
+                <Input
+                  label="Location"
+                  aria-label="Location"
+                  value={newShelterLocation}
+                  onChange={(event) => setNewShelterLocation(event.target.value)}
+                  maxLength={200}
+                  required
+                />
+                <Input
+                  label="Capacity"
+                  aria-label="Capacity"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={newShelterCapacity}
+                  onChange={(event) => setNewShelterCapacity(event.target.value)}
+                  required
+                />
+                <div className="flex justify-end gap-3">
+                  <Button type="button" variant="secondary" onClick={() => setShelterFormOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={submitting}>
+                    {submitting ? 'Saving...' : 'Create shelter'}
+                  </Button>
+                </div>
+            </form>
+          </Modal>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.8fr)]">
             <Card>
@@ -486,48 +750,97 @@ export default function ShelterRelief() {
                     <Notice tone="danger">This shelter is closed and cannot receive allocations.</Notice>
                   )}
 
-                  <Select
-                    label="Relief resource"
-                    aria-label="Relief resource"
-                    value={resourceId}
-                    onChange={(event) => setResourceId(event.target.value)}
-                    options={resources.map((resource) => ({
-                      value: resource._id,
-                      label: `${resource.name} (${resource.availableQuantity} ${resource.unit} available)`,
-                    }))}
-                  />
-                  {selectedResource && (
-                    <div className="rounded-md bg-gray-50 p-3 text-sm">
-                      <p><span className="text-gray-500">Category:</span> {selectedResource.category}</p>
-                      <p><span className="text-gray-500">Available:</span> {selectedResource.availableQuantity.toLocaleString()} {selectedResource.unit}</p>
-                    </div>
-                  )}
-                  <Input
-                    label="Quantity"
-                    aria-label="Allocation quantity"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={quantity}
-                    onChange={(event) => setQuantity(event.target.value)}
-                    error={quantity && (!Number.isInteger(requestedQuantity) || requestedQuantity <= 0) ? 'Enter a positive whole number.' : undefined}
-                  />
-                  {selectedResource && requestedQuantity > selectedResource.availableQuantity && (
-                    <Notice tone="danger">Insufficient inventory. Only {selectedResource.availableQuantity} {selectedResource.unit} are available.</Notice>
-                  )}
+                  <fieldset className="space-y-2">
+                    <legend className="block text-sm font-medium text-gray-700">Relief resource</legend>
+                    <Input
+                      type="search"
+                      aria-label="Search relief resources"
+                      placeholder="Search resources..."
+                      value={resourceSearch}
+                      onChange={(event) => setResourceSearch(event.target.value)}
+                    />
+                    {filteredResources.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500">
+                        {resources.length === 0 ? 'No relief resources available.' : 'No resources match your search.'}
+                      </p>
+                    ) : (
+                      <div className="grid max-h-64 gap-2 overflow-y-auto sm:grid-cols-2" role="group" aria-label="Available relief resources">
+                        {filteredResources.map((resource) => {
+                          const isSelected = Object.prototype.hasOwnProperty.call(allocationQuantities, resource._id);
+                          const unavailable = resource.availableQuantity <= 0;
+                          return (
+                            <div
+                              key={resource._id}
+                              className={`rounded-lg border p-3 transition-colors ${
+                                unavailable
+                                  ? 'cursor-not-allowed border-gray-200 bg-gray-50 text-gray-400'
+                                  : isSelected
+                                    ? 'border-brand-500 bg-brand-50'
+                                    : 'border-gray-200 bg-white'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                aria-pressed={isSelected}
+                                disabled={unavailable}
+                                onClick={() => setAllocationQuantities((current) => {
+                                  if (Object.prototype.hasOwnProperty.call(current, resource._id)) {
+                                    const next = { ...current };
+                                    delete next[resource._id];
+                                    return next;
+                                  }
+                                  return { ...current, [resource._id]: '' };
+                                })}
+                                className="flex w-full items-start justify-between gap-2 rounded text-left focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:cursor-not-allowed"
+                              >
+                                <span className="flex min-w-0 items-start gap-2">
+                                  <Boxes className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-medium">{resource.name}</span>
+                                    <span className="block text-xs text-gray-500">{resource.category}</span>
+                                  </span>
+                                </span>
+                                {isSelected && <CheckCircle2 className="h-4 w-4 shrink-0 text-brand-600" aria-label="Selected" />}
+                              </button>
+                              <p className={`mt-2 text-xs font-medium ${unavailable ? 'text-red-600' : 'text-gray-600'}`}>
+                                {unavailable
+                                  ? 'Out of stock'
+                                  : `${resource.availableQuantity.toLocaleString()} ${resource.unit} available`}
+                              </p>
+                              {isSelected && (
+                                <Input
+                                  className="mt-3"
+                                  label={`Quantity for ${resource.name}`}
+                                  aria-label={`Quantity for ${resource.name}`}
+                                  type="number"
+                                  min="1"
+                                  max={resource.availableQuantity}
+                                  step="1"
+                                  value={allocationQuantities[resource._id]}
+                                  onChange={(event) => setAllocationQuantities((current) => ({
+                                    ...current,
+                                    [resource._id]: event.target.value,
+                                  }))}
+                                  error={allocationQuantities[resource._id] && (
+                                    !Number.isInteger(Number(allocationQuantities[resource._id])) ||
+                                    Number(allocationQuantities[resource._id]) <= 0
+                                  ) ? 'Enter a positive whole number.' :
+                                    Number(allocationQuantities[resource._id]) > resource.availableQuantity
+                                      ? `Only ${resource.availableQuantity} ${resource.unit} available.`
+                                      : undefined}
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </fieldset>
                   {matchingActiveAllocations.length > 0 && (
                     <Notice tone="warning">
                       {matchingActiveAllocations.length} active allocation{matchingActiveAllocations.length === 1 ? '' : 's'} already exist for this shelter and resource. Check for overlapping deliveries.
                     </Notice>
                   )}
-                  <Input
-                    label="Officer name"
-                    aria-label="Officer name"
-                    value={createdBy}
-                    onChange={(event) => setCreatedBy(event.target.value)}
-                    maxLength={120}
-                    placeholder="Name recorded on the allocation"
-                  />
                   <Input
                     label="Notes (optional)"
                     aria-label="Allocation notes"
@@ -538,12 +851,15 @@ export default function ShelterRelief() {
                   <Button
                     type="submit"
                     className="w-full"
-                    disabled={submitting || !shelterId || !resourceId || !Number.isInteger(requestedQuantity) ||
-                      requestedQuantity <= 0 || !createdBy.trim() ||
-                      requestedQuantity > (selectedResource?.availableQuantity ?? 0) ||
+                    disabled={submitting || !shelterId || selectedResources.length === 0 ||
+                      hasInvalidAllocationQuantities || !session?.user.name.trim() ||
                       selectedShelter?.status === 'CLOSED'}
                   >
-                    {submitting ? 'Saving...' : 'Create allocation'}
+                    {submitting
+                      ? 'Saving...'
+                      : selectedResources.length > 0
+                        ? `Create ${selectedResources.length} allocation${selectedResources.length === 1 ? '' : 's'}`
+                        : 'Create allocations'}
                   </Button>
                 </form>
               </CardContent>
@@ -565,13 +881,162 @@ export default function ShelterRelief() {
         </>
       ) : (
         <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>Incoming shelter requests</CardTitle>
+                  <p className="mt-1 text-sm text-gray-500">
+                    New officer requests appear here automatically. Select a request to review and accept or decline it.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void refreshCoordinatorRequests()}
+                  aria-label="Refresh shelter requests"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {coordinatorRequestsError && (
+                <p role="alert" className="text-sm text-red-700">
+                  {coordinatorRequestsError}
+                </p>
+              )}
+              {coordinatorRequests.length === 0 ? (
+                <EmptyState
+                  title="No pending shelter requests"
+                  description="Requests sent by district officers will appear here."
+                />
+              ) : (
+                <>
+                <Select
+                  label="Pending shelter requests"
+                  aria-label="Pending shelter requests"
+                  value={coordinatorRequestId}
+                  onChange={(event) => setCoordinatorRequestId(event.target.value)}
+                  options={coordinatorRequests.map((shelter) => ({
+                    value: shelter._id,
+                    label: `${shelter.name} — ${shelter.location}`,
+                  }))}
+                />
+                {selectedCoordinatorRequest && (
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{selectedCoordinatorRequest.name}</h3>
+                        <p className="text-sm text-gray-600">{selectedCoordinatorRequest.location}</p>
+                      </div>
+                      <Badge variant="warning">Pending approval</Badge>
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <Metric label="Capacity" value={selectedCoordinatorRequest.capacity.toLocaleString()} />
+                      <Metric label="Current occupancy" value={selectedCoordinatorRequest.currentOccupancy.toLocaleString()} />
+                    </div>
+                    {selectedCoordinatorRequest.coordinatorRequestMessage && (
+                      <p className="mt-3 rounded-md bg-white p-3 text-sm text-gray-700">
+                        {selectedCoordinatorRequest.coordinatorRequestMessage}
+                      </p>
+                    )}
+                    <div className="mt-4 flex gap-3">
+                      <Button
+                        type="button"
+                        onClick={() => void respondToCoordinatorRequest('ACCEPTED')}
+                        disabled={submitting}
+                      >
+                        {submitting ? 'Saving...' : 'Accept shelter'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void respondToCoordinatorRequest('DECLINED')}
+                        disabled={submitting}
+                      >
+                        Decline
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                </>
+              )}
+            </CardContent>
+          </Card>
           {selectedCoordinatorShelter && (
             <Card>
-              <CardHeader><CardTitle>{selectedCoordinatorShelter.name} occupancy</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>{selectedCoordinatorShelter.name} occupancy</CardTitle>
+                <p className="mt-1 text-sm text-gray-600">
+                  {selectedCoordinatorShelter.currentOccupancy.toLocaleString()} of {selectedCoordinatorShelter.capacity.toLocaleString()} people
+                  {' '}({selectedCoordinatorShelter.occupancyPercentage}% occupied)
+                </p>
+              </CardHeader>
               <CardContent>
-                <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={saveOccupancy}>
-                  <Input label={`Current occupancy (capacity ${selectedCoordinatorShelter.capacity})`} type="number" min="0" max={selectedCoordinatorShelter.capacity} step="1" value={currentOccupancy || String(selectedCoordinatorShelter.currentOccupancy)} onChange={(event) => setCurrentOccupancy(event.target.value)} />
-                  <Button type="submit" variant="secondary" disabled={submitting}>Update occupancy</Button>
+                <form className="space-y-4" onSubmit={saveOccupancy}>
+                  <div className="flex flex-wrap gap-2" aria-label="Occupancy action">
+                    <Button
+                      type="button"
+                      variant={occupancyAction === 'add' ? 'primary' : 'secondary'}
+                      aria-pressed={occupancyAction === 'add'}
+                      onClick={() => {
+                        setOccupancyAction('add');
+                        setPeopleToAdd('');
+                      }}
+                    >
+                      Add people
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={occupancyAction === 'release' ? 'primary' : 'secondary'}
+                      aria-pressed={occupancyAction === 'release'}
+                      onClick={() => {
+                        setOccupancyAction('release');
+                        setPeopleToAdd('');
+                      }}
+                    >
+                      Release people
+                    </Button>
+                  </div>
+                  <Input
+                    label={occupancyAction === 'add'
+                      ? `People to add (${selectedCoordinatorShelter.availableCapacity} spaces available)`
+                      : `People to release (${selectedCoordinatorShelter.currentOccupancy} people in shelter)`}
+                    aria-label={occupancyAction === 'add' ? 'People to add' : 'People to release'}
+                    type="number"
+                    min="1"
+                    max={availableForOccupancyAction}
+                    step="1"
+                    value={peopleToAdd}
+                    onChange={(event) => setPeopleToAdd(event.target.value)}
+                    error={peopleToAdd && (!Number.isInteger(addedPeople) || addedPeople <= 0)
+                      ? 'Enter a positive whole number.'
+                      : addedPeople > availableForOccupancyAction
+                        ? occupancyAction === 'add'
+                          ? `Only ${selectedCoordinatorShelter.availableCapacity} spaces are available.`
+                          : `Only ${selectedCoordinatorShelter.currentOccupancy} people are currently in the shelter.`
+                        : undefined}
+                  />
+                  {Number.isInteger(addedPeople) && addedPeople > 0 &&
+                    addedPeople <= availableForOccupancyAction && (
+                      <p className="text-sm text-gray-600">
+                        After {occupancyAction === 'add' ? 'adding' : 'releasing'} {addedPeople} {addedPeople === 1 ? 'person' : 'people'}: {resultingOccupancy} of {selectedCoordinatorShelter.capacity} ({Math.round((resultingOccupancy / selectedCoordinatorShelter.capacity) * 100)}% occupied)
+                      </p>
+                    )}
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    disabled={submitting || !Number.isInteger(addedPeople) || addedPeople <= 0 ||
+                      addedPeople > availableForOccupancyAction}
+                  >
+                    {submitting
+                      ? 'Saving...'
+                      : occupancyAction === 'add'
+                        ? 'Confirm people added'
+                        : 'Confirm people released'}
+                  </Button>
                 </form>
               </CardContent>
             </Card>

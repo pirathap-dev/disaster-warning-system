@@ -23,14 +23,30 @@ describe('backend role-based access control', () => {
 
   it('blocks citizen writes to officer and organization operations', async () => {
     const token = authorization(UserRole.CITIZEN);
-    const [assignment, allocation, stock, occupancy] = await Promise.all([
+    const [assignment, allocation, stock, occupancy, shelter, coordinatorRequest] = await Promise.all([
       request(app).post('/api/rescue/assignments').set('Authorization', token).send({}),
       request(app).post('/api/relief-allocations').set('Authorization', token).send({}),
       request(app).post('/api/relief-resources').set('Authorization', token).send({}),
       request(app).patch('/api/shelters/507f1f77bcf86cd799439011/occupancy').set('Authorization', token).send({ currentOccupancy: 10 }),
+      request(app).post('/api/shelters').set('Authorization', token).send({}),
+      request(app).post('/api/shelters/507f1f77bcf86cd799439011/coordinator-request').set('Authorization', token).send({ email: 'coordinator@example.test' }),
     ]);
-    expect([assignment, allocation, stock, occupancy].map((response) => response.status)).toEqual([403, 403, 403, 403]);
-    expect([assignment, allocation, stock, occupancy].every((response) => response.body.error.code === 'FORBIDDEN')).toBe(true);
+    expect([assignment, allocation, stock, occupancy, shelter, coordinatorRequest].map((response) => response.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect([assignment, allocation, stock, occupancy, shelter, coordinatorRequest].every((response) => response.body.error.code === 'FORBIDDEN')).toBe(true);
+  });
+
+  it('allows only the intended roles to request and accept coordinator assignments', async () => {
+    const id = '507f1f77bcf86cd799439011';
+    const [officerAccept, coordinatorRequest] = await Promise.all([
+      request(app).patch(`/api/shelters/${id}/coordinator-request`)
+        .set('Authorization', authorization(UserRole.DISTRICT_OFFICER))
+        .send({ decision: 'ACCEPTED' }),
+      request(app).post(`/api/shelters/${id}/coordinator-request`)
+        .set('Authorization', authorization(UserRole.SHELTER_COORDINATOR))
+        .send({ email: 'coordinator@example.test' }),
+    ]);
+    expect(officerAccept.status).toBe(403);
+    expect(coordinatorRequest.status).toBe(403);
   });
 
   it('allows only resource organizations to manage stock records', async () => {

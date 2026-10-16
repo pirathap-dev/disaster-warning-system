@@ -3,6 +3,10 @@ import { ShelterStatus } from '../types';
 
 export interface IShelter extends Document {
   coordinatorUserId?: string;
+  coordinatorRequestUserId?: string;
+  coordinatorRequestByUserId?: string;
+  coordinatorRequestStatus?: 'PENDING' | 'ACCEPTED' | 'DECLINED';
+  coordinatorRequestMessage?: string;
   name: string;
   location: string;
   capacity: number;
@@ -15,6 +19,13 @@ export interface IShelter extends Document {
 const shelterSchema = new Schema<IShelter>(
   {
     coordinatorUserId: { type: String, index: true, sparse: true },
+    coordinatorRequestUserId: { type: String, index: true },
+    coordinatorRequestByUserId: { type: String },
+    coordinatorRequestStatus: {
+      type: String,
+      enum: ['PENDING', 'ACCEPTED', 'DECLINED'],
+    },
+    coordinatorRequestMessage: { type: String, trim: true, maxlength: 500 },
     name: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true },
     capacity: { type: Number, required: true, min: 1, validate: Number.isInteger },

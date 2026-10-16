@@ -1,36 +1,85 @@
-import request from 'supertest';
+import supertest from 'supertest';
 import app from '../app';
+import { signAuthToken } from '../middleware/auth';
 import {
   confirmReliefReceipt,
   createReliefAllocation,
+  createReliefAllocations,
+  createShelter,
+  getCoordinatorShelterRequests,
   getReliefAllocationById,
   getReliefAllocations,
   getReliefResources,
   getShelterById,
   getShelters,
+  requestShelterCoordinator,
+  respondToCoordinatorShelterRequest,
   updateReliefAllocationStatus,
 } from '../services/reliefService';
-import { ReliefAllocationStatus } from '../types';
+import { ReliefAllocationStatus, UserRole } from '../types';
+
+const officerToken = signAuthToken({
+  id: 'district-officer',
+  name: 'District Officer',
+  email: 'officer@example.test',
+  role: UserRole.DISTRICT_OFFICER,
+});
+const request = (application: typeof app) => ({
+  get: (path: string) => supertest(application).get(path).set('Authorization', `Bearer ${officerToken}`),
+  post: (path: string) => supertest(application).post(path).set('Authorization', `Bearer ${officerToken}`),
+  patch: (path: string) => supertest(application).patch(path).set('Authorization', `Bearer ${officerToken}`),
+});
+
+const coordinatorPatch = (application: typeof app, path: string) => {
+  const token = signAuthToken({
+    id: 'shelter-coordinator',
+    name: 'Shelter Coordinator',
+    email: 'coordinator@example.test',
+    role: UserRole.SHELTER_COORDINATOR,
+  });
+  return supertest(application)
+    .patch(path)
+    .set('Authorization', 'Bearer ' + token);
+};
+const coordinatorRequestGet = (application: typeof app, path: string) => {
+  const token = signAuthToken({
+    id: 'shelter-coordinator',
+    name: 'Shelter Coordinator',
+    email: 'coordinator@example.test',
+    role: UserRole.SHELTER_COORDINATOR,
+  });
+  return supertest(application).get(path).set('Authorization', 'Bearer ' + token);
+};
 
 jest.mock('../services/reliefService', () => ({
   confirmReliefReceipt: jest.fn(),
   createReliefAllocation: jest.fn(),
+  createReliefAllocations: jest.fn(),
+  createShelter: jest.fn(),
+  getCoordinatorShelterRequests: jest.fn(),
   getReliefAllocationById: jest.fn(),
   getReliefAllocations: jest.fn(),
   getReliefResources: jest.fn(),
   getShelterById: jest.fn(),
   getShelters: jest.fn(),
+  requestShelterCoordinator: jest.fn(),
+  respondToCoordinatorShelterRequest: jest.fn(),
   updateReliefAllocationStatus: jest.fn(),
 }));
 
 const services = {
   confirmReceipt: confirmReliefReceipt as jest.Mock,
   createAllocation: createReliefAllocation as jest.Mock,
+  createAllocations: createReliefAllocations as jest.Mock,
+  createShelter: createShelter as jest.Mock,
+  getCoordinatorRequests: getCoordinatorShelterRequests as jest.Mock,
   getAllocation: getReliefAllocationById as jest.Mock,
   getAllocations: getReliefAllocations as jest.Mock,
   getResources: getReliefResources as jest.Mock,
   getShelter: getShelterById as jest.Mock,
   getShelters: getShelters as jest.Mock,
+  requestCoordinator: requestShelterCoordinator as jest.Mock,
+  respondToCoordinatorRequest: respondToCoordinatorShelterRequest as jest.Mock,
   updateStatus: updateReliefAllocationStatus as jest.Mock,
 };
 
@@ -42,6 +91,82 @@ beforeEach(() => {
 });
 
 describe('shelter and resource endpoints', () => {
+  it('validates shelter creation and creates valid shelters', async () => {
+    const missing = await request(app).post('/api/shelters').send({});
+    expect(missing.status).toBe(400);
+    expect(missing.body.error.code).toBe('INVALID_CAPACITY');
+
+    services.createShelter.mockResolvedValue({
+      _id: validId,
+      name: 'Riverside Shelter',
+      currentOccupancy: 0,
+      capacity: 250,
+    });
+    const response = await request(app).post('/api/shelters').send({
+      name: ' Riverside Shelter ',
+      location: ' Riverside Ward ',
+      capacity: 250,
+    });
+    expect(response.status).toBe(201);
+    expect(response.body.data.name).toBe('Riverside Shelter');
+    expect(services.createShelter).toHaveBeenCalledWith({
+      name: 'Riverside Shelter',
+      location: 'Riverside Ward',
+      capacity: 250,
+    });
+  });
+
+  it('creates a coordinator approval request with an optional message', async () => {
+    services.requestCoordinator.mockResolvedValue({
+      _id: validId,
+      coordinatorRequestStatus: 'PENDING',
+    });
+    const response = await request(app)
+      .post(`/api/shelters/${validId}/coordinator-request`)
+      .send({ message: 'Please manage this school shelter' });
+
+    expect(response.status).toBe(201);
+    expect(services.requestCoordinator).toHaveBeenCalledWith(validId, {
+      requestedByUserId: 'district-officer',
+      message: 'Please manage this school shelter',
+    });
+  });
+
+  it('rejects invalid coordinator request IDs', async () => {
+    const invalidId = await request(app).post('/api/shelters/nope/coordinator-request').send({
+    });
+    expect(invalidId.status).toBe(400);
+    expect(services.requestCoordinator).not.toHaveBeenCalled();
+  });
+
+  it('lists requests and lets the addressed coordinator accept or decline', async () => {
+    services.getCoordinatorRequests.mockResolvedValue([{ _id: validId, name: 'School Shelter' }]);
+    const requests = await coordinatorRequestGet(app, '/api/shelters/coordinator-requests');
+    expect(requests.status).toBe(200);
+    expect(services.getCoordinatorRequests).toHaveBeenCalledWith('shelter-coordinator');
+
+    services.respondToCoordinatorRequest.mockResolvedValue({
+      _id: validId,
+      coordinatorRequestStatus: 'ACCEPTED',
+      coordinatorUserId: 'shelter-coordinator',
+    });
+    const accepted = await coordinatorPatch(app, `/api/shelters/${validId}/coordinator-request`)
+      .send({ decision: 'ACCEPTED' });
+    expect(accepted.status).toBe(200);
+    expect(services.respondToCoordinatorRequest).toHaveBeenCalledWith(
+      validId,
+      'shelter-coordinator',
+      'ACCEPTED'
+    );
+  });
+
+  it('rejects invalid coordinator decisions', async () => {
+    const response = await coordinatorPatch(app, `/api/shelters/${validId}/coordinator-request`)
+      .send({ decision: 'MAYBE' });
+    expect(response.status).toBe(400);
+    expect(services.respondToCoordinatorRequest).not.toHaveBeenCalled();
+  });
+
   it('returns the shelter list in the API response shape', async () => {
     services.getShelters.mockResolvedValue([{ _id: validId, name: 'Central Shelter' }]);
     const response = await request(app).get('/api/shelters');
@@ -120,6 +245,32 @@ describe('relief allocation endpoints', () => {
     });
   });
 
+  it('creates allocations for multiple selected resources', async () => {
+    services.createAllocations.mockResolvedValue([
+      { _id: validId, requestedQuantity: 20 },
+      { _id: '507f1f77bcf86cd799439012', requestedQuantity: 8 },
+    ]);
+    const response = await request(app).post('/api/relief-allocations').send({
+      shelterId: validId,
+      allocations: [
+        { resourceId: validId, requestedQuantity: 20 },
+        { resourceId: '507f1f77bcf86cd799439012', requestedQuantity: 8 },
+      ],
+      createdBy: 'District Officer',
+    });
+    expect(response.status).toBe(201);
+    expect(response.body.data).toHaveLength(2);
+    expect(services.createAllocations).toHaveBeenCalledWith({
+      shelterId: validId,
+      allocations: [
+        { resourceId: validId, requestedQuantity: 20 },
+        { resourceId: '507f1f77bcf86cd799439012', requestedQuantity: 8 },
+      ],
+      createdBy: 'District Officer',
+      notes: undefined,
+    });
+  });
+
   it('rejects invalid list filters and passes valid filters to service', async () => {
     const invalid = await request(app).get('/api/relief-allocations?status=UNKNOWN');
     expect(invalid.status).toBe(400);
@@ -142,7 +293,7 @@ describe('relief allocation endpoints', () => {
     services.getAllocation.mockResolvedValue({ _id: validId });
     const response = await request(app).get(`/api/relief-allocations/${validId}`);
     expect(response.status).toBe(200);
-    expect(services.getAllocation).toHaveBeenCalledWith(validId);
+    expect(services.getAllocation).toHaveBeenCalledWith(validId, undefined);
   });
 
   it('validates and applies allocation status updates', async () => {
@@ -156,22 +307,25 @@ describe('relief allocation endpoints', () => {
       .patch(`/api/relief-allocations/${validId}/status`)
       .send({ status: 'DISPATCHED' });
     expect(response.status).toBe(200);
-    expect(services.updateStatus).toHaveBeenCalledWith(validId, ReliefAllocationStatus.DISPATCHED);
+    expect(services.updateStatus).toHaveBeenCalledWith(validId, ReliefAllocationStatus.DISPATCHED, undefined);
   });
 
   it('validates and confirms receipt quantities', async () => {
-    const invalid = await request(app)
-      .patch(`/api/relief-allocations/${validId}/receipt`)
+    const invalid = await coordinatorPatch(app, `/api/relief-allocations/${validId}/receipt`)
       .send({ receivedQuantity: 'many' });
     expect(invalid.status).toBe(400);
     expect(services.confirmReceipt).not.toHaveBeenCalled();
 
     services.confirmReceipt.mockResolvedValue({ _id: validId, status: 'RECEIVED' });
-    const response = await request(app)
-      .patch(`/api/relief-allocations/${validId}/receipt`)
+    const response = await coordinatorPatch(app, `/api/relief-allocations/${validId}/receipt`)
       .send({ receivedQuantity: 18, notes: 'Received in good condition' });
     expect(response.status).toBe(200);
-    expect(services.confirmReceipt).toHaveBeenCalledWith(validId, 18, 'Received in good condition');
+    expect(services.confirmReceipt).toHaveBeenCalledWith(
+      validId,
+      18,
+      'Received in good condition',
+      'shelter-coordinator'
+    );
   });
 
   it('returns service errors through the shared error handler', async () => {

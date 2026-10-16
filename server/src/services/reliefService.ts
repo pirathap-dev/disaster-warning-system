@@ -103,6 +103,91 @@ export async function getShelters() {
   }));
 }
 
+export async function createShelter(input: {
+  name: string;
+  location: string;
+  capacity: number;
+}) {
+  if (!Number.isInteger(input.capacity) || input.capacity <= 0) {
+    throw new ServiceError('Capacity must be a positive whole number', 400, 'INVALID_CAPACITY');
+  }
+  const shelter = await ShelterModel.create({
+    name: input.name,
+    location: input.location,
+    capacity: input.capacity,
+    currentOccupancy: 0,
+    status: ShelterStatus.OPEN,
+  });
+  return { ...shelter.toObject(), ...calculateCapacityMetrics(shelter) };
+}
+
+export async function requestShelterCoordinator(
+  id: string,
+  input: { requestedByUserId: string; message?: string }
+) {
+  const shelter = await ShelterModel.findById(id);
+  if (!shelter) throw new ServiceError('Shelter not found', 404, 'SHELTER_NOT_FOUND');
+  if (shelter.coordinatorUserId) {
+    throw new ServiceError('This shelter already has an assigned coordinator', 409, 'COORDINATOR_ALREADY_ASSIGNED');
+  }
+  if (shelter.coordinatorRequestStatus === 'PENDING') {
+    throw new ServiceError('This shelter already has a pending coordinator request', 409, 'REQUEST_ALREADY_PENDING');
+  }
+  shelter.coordinatorRequestUserId = undefined;
+  shelter.coordinatorRequestByUserId = input.requestedByUserId;
+  shelter.coordinatorRequestStatus = 'PENDING';
+  shelter.coordinatorRequestMessage = input.message;
+  await shelter.save();
+  return { ...shelter.toObject(), ...calculateCapacityMetrics(shelter) };
+}
+
+export async function getCoordinatorShelterRequests(coordinatorUserId: string) {
+  const shelters = await ShelterModel.find({
+    coordinatorRequestStatus: 'PENDING',
+    $or: [
+      { coordinatorRequestUserId: { $exists: false } },
+      { coordinatorRequestUserId: null },
+      { coordinatorRequestUserId: coordinatorUserId },
+    ],
+  }).sort({ createdAt: -1 });
+  return shelters.map((shelter) => ({
+    ...shelter.toObject(),
+    ...calculateCapacityMetrics(shelter),
+  }));
+}
+
+export async function respondToCoordinatorShelterRequest(
+  id: string,
+  coordinatorUserId: string,
+  decision: 'ACCEPTED' | 'DECLINED'
+) {
+  const update = decision === 'ACCEPTED'
+    ? {
+      coordinatorUserId,
+      coordinatorRequestStatus: decision,
+    }
+    : { coordinatorRequestStatus: decision };
+  const shelter = await ShelterModel.findOneAndUpdate(
+    {
+      _id: id,
+      coordinatorRequestStatus: 'PENDING',
+      $or: [
+        { coordinatorRequestUserId: { $exists: false } },
+        { coordinatorRequestUserId: null },
+        { coordinatorRequestUserId: coordinatorUserId },
+      ],
+    },
+    { $set: update },
+    { new: true, runValidators: true }
+  );
+  if (shelter) {
+    return { ...shelter.toObject(), ...calculateCapacityMetrics(shelter) };
+  }
+  const exists = await ShelterModel.exists({ _id: id });
+  if (!exists) throw new ServiceError('Shelter not found', 404, 'SHELTER_NOT_FOUND');
+  throw new ServiceError('This coordinator request is no longer available', 409, 'REQUEST_NOT_PENDING');
+}
+
 export async function getShelterById(id: string) {
   const shelter = await ShelterModel.findById(id);
   if (!shelter) {
@@ -179,37 +264,90 @@ export async function createReliefAllocation(input: {
   createdBy: string;
   notes?: string;
 }) {
-  requirePositiveInteger(input.requestedQuantity, 'Requested quantity');
-  const [shelter, resource] = await Promise.all([
-    ShelterModel.findById(input.shelterId),
-    ReliefResourceModel.findById(input.resourceId),
-  ]);
+  const [allocation] = await createReliefAllocations({
+    shelterId: input.shelterId,
+    allocations: [{
+      resourceId: input.resourceId,
+      requestedQuantity: input.requestedQuantity,
+    }],
+    createdBy: input.createdBy,
+    notes: input.notes,
+  });
+  return allocation;
+}
 
+export async function createReliefAllocations(input: {
+  shelterId: string;
+  allocations: { resourceId: string; requestedQuantity: number }[];
+  createdBy: string;
+  notes?: string;
+}) {
+  if (input.allocations.length === 0) {
+    throw new ServiceError('Select at least one relief resource', 400, 'VALIDATION_ERROR');
+  }
+  const resourceIds = input.allocations.map((item) => item.resourceId);
+  if (new Set(resourceIds).size !== resourceIds.length) {
+    throw new ServiceError('Each relief resource can only be selected once', 400, 'VALIDATION_ERROR');
+  }
+  input.allocations.forEach((item) => requirePositiveInteger(item.requestedQuantity, 'Requested quantity'));
+
+  const shelter = await ShelterModel.findById(input.shelterId);
   if (!shelter) {
     throw new ServiceError('Shelter not found', 404, 'SHELTER_NOT_FOUND');
   }
   if (shelter.status === ShelterStatus.CLOSED) {
     throw new ServiceError('Cannot allocate supplies to a closed shelter', 409, 'SHELTER_CLOSED');
   }
-  if (!resource) {
+
+  const resources = await Promise.all(resourceIds.map((id) => ReliefResourceModel.findById(id)));
+  if (resources.some((resource) => !resource)) {
     throw new ServiceError('Relief resource not found', 404, 'RESOURCE_NOT_FOUND');
   }
 
-  await reserveInventory(input.resourceId, input.requestedQuantity);
+  const reserved: typeof input.allocations = [];
+  const createdIds: (string | Types.ObjectId)[] = [];
   try {
-    return await ReliefAllocationModel.create({
-      shelter: input.shelterId,
-      resource: input.resourceId,
-      requestedQuantity: input.requestedQuantity,
-      allocatedQuantity: input.requestedQuantity,
-      deliveredQuantity: 0,
-      status: ReliefAllocationStatus.ALLOCATED,
-      createdBy: input.createdBy,
-      notes: input.notes,
-      allocatedAt: new Date(),
-    });
+    for (const item of input.allocations) {
+      await reserveInventory(item.resourceId, item.requestedQuantity);
+      reserved.push(item);
+    }
+
+    const allocations = [];
+    for (const item of input.allocations) {
+      const created = await ReliefAllocationModel.create({
+        shelter: input.shelterId,
+        resource: item.resourceId,
+        requestedQuantity: item.requestedQuantity,
+        allocatedQuantity: item.requestedQuantity,
+        deliveredQuantity: 0,
+        status: ReliefAllocationStatus.ALLOCATED,
+        createdBy: input.createdBy,
+        notes: input.notes,
+        allocatedAt: new Date(),
+      });
+      allocations.push(created);
+      createdIds.push(created._id);
+    }
+    return allocations;
   } catch (error) {
-    await restoreInventory(input.resourceId, input.requestedQuantity);
+    try {
+      if (createdIds.length) {
+        const result = await ReliefAllocationModel.deleteMany({ _id: { $in: createdIds } });
+        if (result.deletedCount !== createdIds.length) {
+          throw new Error('Could not remove all partially created relief allocations');
+        }
+      }
+      for (const item of reserved.reverse()) {
+        await restoreInventory(item.resourceId, item.requestedQuantity);
+      }
+    } catch (rollbackError) {
+      if (rollbackError instanceof ServiceError) throw rollbackError;
+      throw new ServiceError(
+        `Relief allocation failed and rollback was incomplete: ${rollbackError instanceof Error ? rollbackError.message : 'Unknown rollback error'}`,
+        500,
+        'ALLOCATION_ROLLBACK_FAILED'
+      );
+    }
     throw error;
   }
 }
