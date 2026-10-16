@@ -12,6 +12,7 @@ export interface Shelter {
   _id: string;
   name: string;
   location: string;
+  facilities: string[];
   capacity: number;
   currentOccupancy: number;
   availableCapacity: number;
@@ -36,6 +37,8 @@ export interface ReliefAllocation {
   requestedQuantity: number;
   allocatedQuantity: number;
   deliveredQuantity: number;
+  peopleExpected?: number;
+  peopleReceived?: number;
   status: ReliefAllocationStatus;
   createdBy: string;
   notes?: string;
@@ -73,16 +76,28 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const reliefApi = {
   getShelters: () => request<Shelter[]>('/shelters'),
+  clearShelterOccupancy: (id: string) =>
+    request<Shelter>(`/shelters/${id}/clear-occupancy`, { method: 'POST' }),
+  createShelter: (shelter: {
+    name: string;
+    location: string;
+    capacity: number;
+    facilities: string[];
+  }) =>
+    request<Shelter>('/shelters', {
+      method: 'POST',
+      body: JSON.stringify(shelter),
+    }),
   getResources: () => request<ReliefResource[]>('/relief-resources'),
   getAllocations: () => request<ReliefAllocation[]>('/relief-allocations'),
   createAllocation: (allocation: {
     shelterId: string;
-    resourceId: string;
-    requestedQuantity: number;
+    items: { resourceId: string; requestedQuantity: number }[];
     createdBy: string;
     notes?: string;
+    peopleExpected: number;
   }) =>
-    request<ReliefAllocation>('/relief-allocations', {
+    request<ReliefAllocation[]>('/relief-allocations', {
       method: 'POST',
       body: JSON.stringify(allocation),
     }),
@@ -91,9 +106,18 @@ export const reliefApi = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     }),
-  confirmReceipt: (id: string, receivedQuantity: number, notes?: string) =>
+  deleteAllocation: (id: string) =>
+    request<{ id: string }>(`/relief-allocations/${id}`, {
+      method: 'DELETE',
+    }),
+  confirmReceipt: (
+    id: string,
+    receivedQuantity: number,
+    notes?: string,
+    receivedPeople?: number
+  ) =>
     request<ReliefAllocation>(`/relief-allocations/${id}/receipt`, {
       method: 'PATCH',
-      body: JSON.stringify({ receivedQuantity, notes }),
+      body: JSON.stringify({ receivedQuantity, notes, receivedPeople }),
     }),
 };

@@ -7,6 +7,8 @@ export interface IReliefAllocation extends Document {
   requestedQuantity: number;
   allocatedQuantity: number;
   deliveredQuantity: number;
+  peopleExpected: number;
+  peopleReceived: number;
   status: ReliefAllocationStatus;
   createdBy: string;
   notes?: string;
@@ -49,6 +51,20 @@ const reliefAllocationSchema = new Schema<IReliefAllocation>(
       type: Number,
       required: true,
       min: 0,
+      validate: Number.isInteger,
+    },
+    peopleExpected: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
+      validate: Number.isInteger,
+    },
+    peopleReceived: {
+      type: Number,
+      required: true,
+      min: 0,
+      default: 0,
       validate: Number.isInteger,
     },
     status: {

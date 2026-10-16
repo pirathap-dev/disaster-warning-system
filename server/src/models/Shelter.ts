@@ -4,6 +4,7 @@ import { ShelterStatus } from '../types';
 export interface IShelter extends Document {
   name: string;
   location: string;
+  facilities: string[];
   capacity: number;
   currentOccupancy: number;
   status: ShelterStatus;
@@ -15,6 +16,7 @@ const shelterSchema = new Schema<IShelter>(
   {
     name: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true },
+    facilities: { type: [String], default: [] },
     capacity: { type: Number, required: true, min: 1, validate: Number.isInteger },
     currentOccupancy: {
       type: Number,

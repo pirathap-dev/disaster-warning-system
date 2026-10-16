@@ -78,7 +78,8 @@ Create `.env` files in both the `client` and `server` directories based on the p
 ```env
 PORT=5000
 NODE_ENV=development
-MONGO_URI=mongodb://localhost:27017/disaster_management_dev
+MONGO_URI=mongodb://127.0.0.1:27017/disaster_management_dev
+MONGO_CONNECT_TIMEOUT_MS=5000
 ```
 
 **`client/.env`:**
@@ -89,10 +90,30 @@ VITE_API_URL=http://localhost:5000/api
 The shelter and relief module can also use the defaults above if these files are
 not created. `createdBy` is entered on the allocation form because this project
 does not yet have authentication middleware or a signed-in user context.
+Copy `server/.env.example` to `server/.env` as a starting point. The server
+loads this file from the `server` folder and only begins listening after it
+successfully connects to MongoDB. It exits with a connection error if the
+database is unavailable.
 
 ## 6. Database Setup
 
-Ensure MongoDB is running locally. The server is configured to connect to `mongodb://localhost:27017/disaster_management_dev` by default.
+Run a local MongoDB Community Server on port `27017`, or use MongoDB Atlas:
+
+1. Create an Atlas database user and allow your current IP address in Network Access.
+2. Copy the driver's connection string from Atlas and place it in `MONGO_URI` in `server/.env`. Replace the username, password, and database name with your own values. URL-encode special characters in the password.
+3. Keep `server/.env` private; it is ignored by Git. Never paste a database password into source files or commit it.
+
+If using a local installation on Windows, check/start its service from an
+Administrator PowerShell:
+```powershell
+Get-Service -Name MongoDB
+Start-Service -Name MongoDB
+Test-NetConnection localhost -Port 27017
+```
+
+If `Get-Service` finds no MongoDB service, install MongoDB Community Server or
+configure Atlas. The API cannot connect to a database that is not installed or
+running.
 
 To load idempotent demonstration shelters and inventory records for the Shelter
 & Relief screen, run this from the project root after MongoDB is running:
@@ -113,15 +134,17 @@ npm run dev
 - **Backend** runs on `http://localhost:5000`
 - **Shelter API:**
   - `GET /api/shelters` and `GET /api/shelters/:id` return capacity, occupancy percentage, available capacity, and derived capacity status.
+  - `POST /api/shelters/:id/clear-occupancy` checks out all occupants by setting the shelter's recorded occupancy to zero; shelter and relief-allocation records are retained.
   - `GET /api/relief-resources` returns current resource stock.
   - `POST /api/relief-allocations` accepts `shelterId`, `resourceId`, `requestedQuantity`, `createdBy`, and optional `notes`. A successful allocation starts as `ALLOCATED` and atomically reserves inventory.
   - `GET /api/relief-allocations` supports optional `shelterId`, `resourceId`, and `status` filters; `GET /api/relief-allocations/:id` returns allocation details.
   - `PATCH /api/relief-allocations/:id/status` advances valid non-receipt transitions; `PATCH /api/relief-allocations/:id/receipt` confirms the delivered quantity.
 - **Allocation lifecycle:** `REQUESTED → ALLOCATED → DISPATCHED → RECEIVED → COMPLETED`; a `REQUESTED` allocation may instead be cancelled. Receipt confirmation records the delivered amount and performs the `DISPATCHED → RECEIVED` transition.
 - **Coordinator workspace:** use the Shelter Coordinator tab on the Shelter & Relief screen to view deliveries and confirm receipts
+- **Admin workspace:** use **Empty shelter** after confirming everyone has left. Occupancy is an aggregate count; individual member records are not currently stored, and shelter and allocation records are retained.
 
 The project currently defines user roles but does not yet implement authentication
-or route-level authorization. The officer and coordinator tabs are therefore
+or route-level authorization. The admin, officer, and coordinator tabs are therefore
 workflow views, not access-control boundaries.
 
 ## 8. Running Tests

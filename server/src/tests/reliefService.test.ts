@@ -3,8 +3,12 @@ import { ReliefResourceModel } from '../models/ReliefResource';
 import { ShelterModel } from '../models/Shelter';
 import {
   calculateCapacityMetrics,
+  clearShelterOccupancy,
   confirmReliefReceipt,
   createReliefAllocation,
+  createReliefAllocations,
+  createShelterRecord,
+  deleteCancelledReliefAllocation,
   getReliefAllocationById,
   getReliefAllocations,
   getReliefResources,
@@ -21,9 +25,12 @@ import {
 jest.mock('../models/ReliefAllocation', () => ({
   ReliefAllocationModel: {
     create: jest.fn(),
+    deleteMany: jest.fn(),
+    deleteOne: jest.fn(),
     find: jest.fn(),
     findById: jest.fn(),
     findOneAndUpdate: jest.fn(),
+    updateOne: jest.fn(),
   },
 }));
 jest.mock('../models/ReliefResource', () => ({
@@ -36,8 +43,11 @@ jest.mock('../models/ReliefResource', () => ({
 }));
 jest.mock('../models/Shelter', () => ({
   ShelterModel: {
+    create: jest.fn(),
     find: jest.fn(),
     findById: jest.fn(),
+    findOneAndUpdate: jest.fn(),
+    updateOne: jest.fn(),
   },
 }));
 
@@ -134,6 +144,51 @@ describe('shelter capacity', () => {
       code: 'SHELTER_NOT_FOUND',
     });
   });
+
+  it('clears shelter occupancy while retaining the shelter record', async () => {
+    const clearedShelter = shelter({ currentOccupancy: 0 });
+    (modelMocks.shelter.findOneAndUpdate as jest.Mock).mockResolvedValue(clearedShelter);
+
+    await expect(clearShelterOccupancy('shelter-1')).resolves.toMatchObject({
+      _id: 'shelter-1',
+      currentOccupancy: 0,
+      availableCapacity: 500,
+      occupancyPercentage: 0,
+      capacityStatus: ShelterCapacityStatus.OPEN,
+    });
+    expect(modelMocks.shelter.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'shelter-1' },
+      { $set: { currentOccupancy: 0 } },
+      { new: true }
+    );
+  });
+
+  it('reports an unknown shelter when clearing occupancy', async () => {
+    (modelMocks.shelter.findOneAndUpdate as jest.Mock).mockResolvedValue(null);
+    await expect(clearShelterOccupancy('missing')).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'SHELTER_NOT_FOUND',
+    });
+  });
+
+  it('creates a shelter at zero occupancy with its facilities', async () => {
+    (modelMocks.shelter.create as jest.Mock).mockResolvedValue({ name: 'North Shelter' });
+    await createShelterRecord({
+      name: 'North Shelter',
+      location: 'North District',
+      capacity: 200,
+      facilities: ['Water', 'Medical care'],
+    });
+    expect(modelMocks.shelter.create).toHaveBeenCalledWith({
+      name: 'North Shelter',
+      location: 'North District',
+      capacity: 200,
+      facilities: ['Water', 'Medical care'],
+      currentOccupancy: 0,
+      status: ShelterStatus.OPEN,
+    });
+  });
+
 });
 
 describe('relief inventory allocations', () => {
@@ -142,6 +197,7 @@ describe('relief inventory allocations', () => {
     resourceId: 'resource-1',
     requestedQuantity: 300,
     createdBy: 'District Officer',
+    peopleExpected: 10,
   };
 
   beforeEach(() => {
@@ -174,6 +230,51 @@ describe('relief inventory allocations', () => {
       deliveredQuantity: 0,
       status: ReliefAllocationStatus.ALLOCATED,
     }));
+  });
+
+  it('reserves and creates one allocation per selected relief resource', async () => {
+    (modelMocks.resource.findById as jest.Mock).mockResolvedValue({ availableQuantity: 1000, unit: 'items' });
+    (modelMocks.allocation.create as jest.Mock)
+      .mockResolvedValueOnce(allocation({ _id: 'allocation-water', resource: 'resource-water' }))
+      .mockResolvedValueOnce(allocation({ _id: 'allocation-food', resource: 'resource-food' }));
+    const result = await createReliefAllocations({
+      shelterId: 'shelter-1',
+      items: [
+        { resourceId: 'resource-water', requestedQuantity: 30 },
+        { resourceId: 'resource-food', requestedQuantity: 10 },
+      ],
+      createdBy: 'District Officer',
+      peopleExpected: 10,
+    });
+    expect(result).toHaveLength(2);
+    expect(modelMocks.resource.findOneAndUpdate).toHaveBeenCalledTimes(2);
+    expect(modelMocks.allocation.create).toHaveBeenCalledTimes(2);
+    expect(modelMocks.allocation.create).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ peopleExpected: 10, peopleReceived: 0 })
+    );
+    expect(modelMocks.allocation.create).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ peopleExpected: 0, peopleReceived: 0 })
+    );
+  });
+
+  it('restores every reserved item if creating a multi-resource allocation fails', async () => {
+    (modelMocks.resource.findById as jest.Mock).mockResolvedValue({ availableQuantity: 1000, unit: 'items' });
+    (modelMocks.allocation.create as jest.Mock)
+      .mockResolvedValueOnce(allocation({ _id: 'allocation-water' }))
+      .mockRejectedValueOnce(new Error('database write failed'));
+    (modelMocks.allocation.deleteMany as jest.Mock).mockResolvedValue({ deletedCount: 1 });
+    await expect(createReliefAllocations({
+      shelterId: 'shelter-1',
+      items: [
+        { resourceId: 'resource-water', requestedQuantity: 30 },
+        { resourceId: 'resource-food', requestedQuantity: 10 },
+      ],
+      createdBy: 'District Officer',
+    })).rejects.toThrow('database write failed');
+    expect(modelMocks.allocation.deleteMany).toHaveBeenCalled();
+    expect(modelMocks.resource.updateOne).toHaveBeenCalledTimes(2);
   });
 
   it.each([0, -1, 1.5])('rejects invalid allocation quantity %s', async (quantity) => {
@@ -222,6 +323,20 @@ describe('relief inventory allocations', () => {
     await expect(createReliefAllocation(input)).rejects.toMatchObject({
       statusCode: 409,
       code: 'SHELTER_CLOSED',
+    });
+    expect(modelMocks.resource.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects planned arrivals above available shelter capacity', async () => {
+    (modelMocks.shelter.findById as jest.Mock).mockResolvedValue(
+      shelter({ currentOccupancy: 495 })
+    );
+    await expect(createReliefAllocation({
+      ...input,
+      peopleExpected: 10,
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'SHELTER_CAPACITY_EXCEEDED',
     });
     expect(modelMocks.resource.findOneAndUpdate).not.toHaveBeenCalled();
   });
@@ -332,6 +447,32 @@ describe('allocation lifecycle and receipt', () => {
     )).rejects.toMatchObject({ code: 'INVALID_STATUS_TRANSITION' });
   });
 
+  it('removes an allocated item and restores its reserved inventory', async () => {
+    (modelMocks.allocation.findById as jest.Mock).mockResolvedValue(
+      allocation({ status: ReliefAllocationStatus.ALLOCATED, requestedQuantity: 12 })
+    );
+    (modelMocks.allocation.findOneAndUpdate as jest.Mock).mockResolvedValue(
+      allocation({ status: ReliefAllocationStatus.CANCELLED, requestedQuantity: 12 })
+    );
+    (modelMocks.resource.updateOne as jest.Mock).mockResolvedValue({ matchedCount: 1 });
+
+    await expect(updateReliefAllocationStatus('allocation-1', ReliefAllocationStatus.CANCELLED))
+      .resolves.toMatchObject({ status: ReliefAllocationStatus.CANCELLED });
+
+    expect(modelMocks.allocation.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'allocation-1', status: ReliefAllocationStatus.ALLOCATED },
+      { $set: expect.objectContaining({
+        status: ReliefAllocationStatus.CANCELLED,
+        cancelledAt: expect.any(Date),
+      }) },
+      { new: true, runValidators: true }
+    );
+    expect(modelMocks.resource.updateOne).toHaveBeenCalledWith(
+      { _id: 'resource-1' },
+      { $inc: { availableQuantity: 12 } }
+    );
+  });
+
   it('reports missing allocations during status updates and receipt confirmation', async () => {
     (modelMocks.allocation.findById as jest.Mock).mockResolvedValue(null);
     await expect(updateReliefAllocationStatus(
@@ -340,6 +481,32 @@ describe('allocation lifecycle and receipt', () => {
     )).rejects.toMatchObject({ code: 'ALLOCATION_NOT_FOUND' });
     await expect(confirmReliefReceipt('missing', 1))
       .rejects.toMatchObject({ code: 'ALLOCATION_NOT_FOUND' });
+  });
+
+  it('deletes cancelled allocations without changing already-restored inventory', async () => {
+    (modelMocks.allocation.findById as jest.Mock).mockResolvedValue(
+      allocation({ status: ReliefAllocationStatus.CANCELLED })
+    );
+    (modelMocks.allocation.deleteOne as jest.Mock).mockResolvedValue({ deletedCount: 1 });
+
+    await expect(deleteCancelledReliefAllocation('allocation-1')).resolves.toEqual({
+      id: 'allocation-1',
+    });
+    expect(modelMocks.allocation.deleteOne).toHaveBeenCalledWith({
+      _id: 'allocation-1',
+      status: ReliefAllocationStatus.CANCELLED,
+    });
+    expect(modelMocks.resource.updateOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting allocations that are not cancelled', async () => {
+    (modelMocks.allocation.findById as jest.Mock).mockResolvedValue(
+      allocation({ status: ReliefAllocationStatus.COMPLETED })
+    );
+
+    await expect(deleteCancelledReliefAllocation('allocation-1'))
+      .rejects.toMatchObject({ statusCode: 409, code: 'ALLOCATION_NOT_CANCELLED' });
+    expect(modelMocks.allocation.deleteOne).not.toHaveBeenCalled();
   });
 
   it('restores inventory if a concurrent status update defeats allocation', async () => {
@@ -382,6 +549,42 @@ describe('allocation lifecycle and receipt', () => {
         receivedAt: expect.any(Date),
         notes: 'Two boxes damaged',
       }) },
+      { new: true, runValidators: true }
+    );
+  });
+
+  it('adds coordinator-confirmed arrivals to the selected shelter occupancy', async () => {
+    (modelMocks.allocation.findById as jest.Mock).mockResolvedValue(
+      allocation({
+        status: ReliefAllocationStatus.DISPATCHED,
+        peopleExpected: 100,
+      })
+    );
+    (modelMocks.shelter.findOneAndUpdate as jest.Mock).mockResolvedValue(
+      shelter({ currentOccupancy: 400 })
+    );
+    (modelMocks.allocation.findOneAndUpdate as jest.Mock).mockResolvedValue(
+      allocation({
+        status: ReliefAllocationStatus.RECEIVED,
+        peopleExpected: 100,
+        peopleReceived: 100,
+      })
+    );
+
+    await expect(confirmReliefReceipt('allocation-1', 40, undefined, 100))
+      .resolves.toMatchObject({ peopleExpected: 100, peopleReceived: 100 });
+    expect(modelMocks.shelter.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        _id: 'shelter-1',
+        status: ShelterStatus.OPEN,
+        $expr: { $lte: [{ $add: ['$currentOccupancy', 100] }, '$capacity'] },
+      },
+      { $inc: { currentOccupancy: 100 } },
+      { new: true, runValidators: true }
+    );
+    expect(modelMocks.allocation.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: 'allocation-1', status: ReliefAllocationStatus.DISPATCHED },
+      { $set: expect.objectContaining({ peopleReceived: 100 }) },
       { new: true, runValidators: true }
     );
   });

@@ -1,8 +1,12 @@
 import request from 'supertest';
 import app from '../app';
 import {
+  clearShelterOccupancy,
   confirmReliefReceipt,
   createReliefAllocation,
+  createReliefAllocations,
+  createShelterRecord,
+  deleteCancelledReliefAllocation,
   getReliefAllocationById,
   getReliefAllocations,
   getReliefResources,
@@ -13,8 +17,12 @@ import {
 import { ReliefAllocationStatus } from '../types';
 
 jest.mock('../services/reliefService', () => ({
+  clearShelterOccupancy: jest.fn(),
   confirmReliefReceipt: jest.fn(),
   createReliefAllocation: jest.fn(),
+  createReliefAllocations: jest.fn(),
+  createShelterRecord: jest.fn(),
+  deleteCancelledReliefAllocation: jest.fn(),
   getReliefAllocationById: jest.fn(),
   getReliefAllocations: jest.fn(),
   getReliefResources: jest.fn(),
@@ -24,8 +32,12 @@ jest.mock('../services/reliefService', () => ({
 }));
 
 const services = {
+  clearShelter: clearShelterOccupancy as jest.Mock,
   confirmReceipt: confirmReliefReceipt as jest.Mock,
   createAllocation: createReliefAllocation as jest.Mock,
+  createAllocations: createReliefAllocations as jest.Mock,
+  createShelter: createShelterRecord as jest.Mock,
+  deleteAllocation: deleteCancelledReliefAllocation as jest.Mock,
   getAllocation: getReliefAllocationById as jest.Mock,
   getAllocations: getReliefAllocations as jest.Mock,
   getResources: getReliefResources as jest.Mock,
@@ -64,6 +76,36 @@ describe('shelter and resource endpoints', () => {
     const response = await request(app).get(`/api/shelters/${validId}`);
     expect(response.status).toBe(200);
     expect(services.getShelter).toHaveBeenCalledWith(validId);
+  });
+
+  it('validates and clears occupancy for a shelter', async () => {
+    services.clearShelter.mockResolvedValue({ _id: validId, currentOccupancy: 0 });
+    const response = await request(app).post(`/api/shelters/${validId}/clear-occupancy`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.currentOccupancy).toBe(0);
+    expect(services.clearShelter).toHaveBeenCalledWith(validId);
+
+    const invalid = await request(app).post('/api/shelters/not-an-id/clear-occupancy');
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.error.code).toBe('INVALID_ID');
+    expect(services.clearShelter).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a shelter with facilities', async () => {
+    services.createShelter.mockResolvedValue({ _id: validId, name: 'North Shelter' });
+    const response = await request(app).post('/api/shelters').send({
+      name: 'North Shelter',
+      location: 'North District',
+      capacity: 250,
+      facilities: ['Water', 'Medical care'],
+    });
+    expect(response.status).toBe(201);
+    expect(services.createShelter).toHaveBeenCalledWith({
+      name: 'North Shelter',
+      location: 'North District',
+      capacity: 250,
+      facilities: ['Water', 'Medical care'],
+    });
   });
 
   it('returns resource inventory', async () => {
@@ -108,6 +150,7 @@ describe('relief allocation endpoints', () => {
       requestedQuantity: 20,
       createdBy: 'District Officer',
       notes: 'Priority delivery',
+      peopleExpected: 10,
     });
     expect(response.status).toBe(201);
     expect(response.body.data.status).toBe('ALLOCATED');
@@ -117,6 +160,30 @@ describe('relief allocation endpoints', () => {
       requestedQuantity: 20,
       createdBy: 'District Officer',
       notes: 'Priority delivery',
+      peopleExpected: 10,
+    });
+  });
+
+  it('creates allocations for multiple relief resources', async () => {
+    services.createAllocations.mockResolvedValue([{ _id: validId }, { _id: '507f1f77bcf86cd799439012' }]);
+    const items = [
+      { resourceId: validId, requestedQuantity: 20 },
+      { resourceId: '507f1f77bcf86cd799439012', requestedQuantity: 5 },
+    ];
+    const response = await request(app).post('/api/relief-allocations').send({
+      shelterId: validId,
+      items,
+      createdBy: 'District Officer',
+      peopleExpected: 10,
+    });
+    expect(response.status).toBe(201);
+    expect(response.body.data).toHaveLength(2);
+    expect(services.createAllocations).toHaveBeenCalledWith({
+      shelterId: validId,
+      items,
+      createdBy: 'District Officer',
+      notes: undefined,
+      peopleExpected: 10,
     });
   });
 
@@ -145,6 +212,18 @@ describe('relief allocation endpoints', () => {
     expect(services.getAllocation).toHaveBeenCalledWith(validId);
   });
 
+  it('validates and deletes a cancelled allocation', async () => {
+    const invalid = await request(app).delete('/api/relief-allocations/not-an-id');
+    expect(invalid.status).toBe(400);
+    expect(services.deleteAllocation).not.toHaveBeenCalled();
+
+    services.deleteAllocation.mockResolvedValue({ id: validId });
+    const response = await request(app).delete(`/api/relief-allocations/${validId}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual({ id: validId });
+    expect(services.deleteAllocation).toHaveBeenCalledWith(validId);
+  });
+
   it('validates and applies allocation status updates', async () => {
     const invalid = await request(app)
       .patch(`/api/relief-allocations/${validId}/status`)
@@ -169,9 +248,9 @@ describe('relief allocation endpoints', () => {
     services.confirmReceipt.mockResolvedValue({ _id: validId, status: 'RECEIVED' });
     const response = await request(app)
       .patch(`/api/relief-allocations/${validId}/receipt`)
-      .send({ receivedQuantity: 18, notes: 'Received in good condition' });
+      .send({ receivedQuantity: 18, notes: 'Received in good condition', receivedPeople: 100 });
     expect(response.status).toBe(200);
-    expect(services.confirmReceipt).toHaveBeenCalledWith(validId, 18, 'Received in good condition');
+    expect(services.confirmReceipt).toHaveBeenCalledWith(validId, 18, 'Received in good condition', 100);
   });
 
   it('returns service errors through the shared error handler', async () => {

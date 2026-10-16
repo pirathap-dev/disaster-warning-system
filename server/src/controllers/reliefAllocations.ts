@@ -4,6 +4,8 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import {
   confirmReliefReceipt,
   createReliefAllocation,
+  createReliefAllocations,
+  deleteCancelledReliefAllocation,
   getReliefAllocationById,
   getReliefAllocations,
   updateReliefAllocationStatus,
@@ -28,6 +30,21 @@ function requiredString(value: unknown, field: string): string {
 function positiveInteger(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
     throw new ServiceError(`${field} must be a positive whole number`, 400, 'INVALID_QUANTITY');
+  }
+  return value;
+}
+
+function nonNegativeInteger(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new ServiceError(`${field} must be a non-negative whole number`, 400, 'INVALID_QUANTITY');
+  }
+  return value;
+}
+
+function optionalNonNegativeInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new ServiceError(`${field} must be a non-negative whole number`, 400, 'INVALID_QUANTITY');
   }
   return value;
 }
@@ -76,16 +93,42 @@ export const createAllocation = asyncHandler(
   async (req: Request, res: Response) => {
     const body = requestBody(req.body);
     const shelterId = requiredString(body.shelterId, 'Shelter');
-    const resourceId = requiredString(body.resourceId, 'Resource');
-    if (!isValidObjectId(shelterId) || !isValidObjectId(resourceId)) {
-      throw new ServiceError('Invalid shelter or resource ID', 400, 'INVALID_ID');
+    if (!isValidObjectId(shelterId)) {
+      throw new ServiceError('Invalid shelter ID', 400, 'INVALID_ID');
     }
     const createdBy = requiredString(body.createdBy, 'Created by');
     if (createdBy.length > 120) {
       throw new ServiceError('Created by must be 120 characters or fewer', 400, 'VALIDATION_ERROR');
     }
     const notes = optionalNotes(body.notes);
+    const peopleExpected = optionalNonNegativeInteger(body.peopleExpected, 'People arriving') ?? 0;
 
+    if (body.items !== undefined) {
+      if (!Array.isArray(body.items)) {
+        throw new ServiceError('Items must be a list of relief resources', 400, 'VALIDATION_ERROR');
+      }
+      const items = body.items.map((value) => {
+        const item = requestBody(value);
+        const resourceId = requiredString(item.resourceId, 'Resource');
+        if (!isValidObjectId(resourceId)) {
+          throw new ServiceError('Invalid resource ID', 400, 'INVALID_ID');
+        }
+        return {
+          resourceId,
+          requestedQuantity: positiveInteger(item.requestedQuantity, 'Requested quantity'),
+        };
+      });
+      res.status(201).json({
+        success: true,
+        data: await createReliefAllocations({ shelterId, items, createdBy, notes, peopleExpected }),
+      });
+      return;
+    }
+
+    const resourceId = requiredString(body.resourceId, 'Resource');
+    if (!isValidObjectId(resourceId)) {
+      throw new ServiceError('Invalid resource ID', 400, 'INVALID_ID');
+    }
     res.status(201).json({
       success: true,
       data: await createReliefAllocation({
@@ -94,6 +137,7 @@ export const createAllocation = asyncHandler(
         requestedQuantity: positiveInteger(body.requestedQuantity, 'Requested quantity'),
         createdBy,
         notes,
+        peopleExpected,
       }),
     });
   }
@@ -105,6 +149,16 @@ export const readAllocation = asyncHandler(
     res.status(200).json({
       success: true,
       data: await getReliefAllocationById(req.params.id),
+    });
+  }
+);
+
+export const deleteAllocation = asyncHandler(
+  async (req: Request, res: Response) => {
+    validateId(req.params.id);
+    res.status(200).json({
+      success: true,
+      data: await deleteCancelledReliefAllocation(req.params.id),
     });
   }
 );
@@ -135,12 +189,16 @@ export const confirmAllocationReceipt = asyncHandler(
     validateId(req.params.id);
     const body = requestBody(req.body);
     const notes = optionalNotes(body.notes);
+    const receivedPeople = body.receivedPeople === undefined
+      ? undefined
+      : nonNegativeInteger(body.receivedPeople, 'People received');
     res.status(200).json({
       success: true,
       data: await confirmReliefReceipt(
         req.params.id,
         positiveInteger(body.receivedQuantity, 'Received quantity'),
-        notes
+        notes,
+        receivedPeople
       ),
     });
   }

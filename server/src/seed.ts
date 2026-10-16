@@ -1,10 +1,11 @@
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import path from 'path';
 import { ReliefResourceModel } from './models/ReliefResource';
 import { ShelterModel } from './models/Shelter';
 import { ShelterStatus } from './types';
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 async function seedDemoData() {
   const uri = process.env.MONGO_URI || 'mongodb://localhost:27017/disaster_management_dev';
